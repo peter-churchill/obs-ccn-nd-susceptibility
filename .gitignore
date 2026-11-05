@@ -1,0 +1,7 @@
+# Whitelist: ignore everything, then allow only code and docs.
+# Data (tens of GB), outputs, logs and spreadsheets stay out of the repo.
+*
+!.gitignore
+!README.md
+!environment.yml
+!*.py
