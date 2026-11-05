@@ -10,6 +10,7 @@ comparison with NorESM and EC-Earth station output.
 | Script | What it does |
 |---|---|
 | `arm_ena_nd_pnsd.py` | ARM sites (ENA, SGP, LASIC). Subcommands `discover`, `download`, `build`, `quicklook`. Nd from the NDROP retrieval (MFRSR + MWR, daytime overcast); aerosol from surface SMPS or UHSAS; optional surface met for a coupling (cloud base minus LCL) screen. |
+| `cloudnet_download.py`, `cloudnet_build.py` | Cloudnet (ACTRIS) droplet number (`der` product, scaled-Frisch N_scaled) from the open API, matched with an EBAS size distribution or an ARM aerosol folder; same output layout. |
 | `epcape_build.py` | EPCAPE Mt. Soledad (La Jolla, 2023–24): FM-120 fog-monitor Nd paired with clear-air SEMS spectra within ±3 h, excluding logged instrument periods. Output is read by `arm_ena_nd_pnsd.py quicklook`. |
 
 ## Method
@@ -38,11 +39,11 @@ setx ARM_TOKEN your_armlive_token
 
 ```
 python arm_ena_nd_pnsd.py discover
-python arm_ena_nd_pnsd.py download --ds enandropmfrsrC1.c1 --start 2023-01-01 --end 2023-12-31 --out data/ndrop
-python arm_ena_nd_pnsd.py download --ds enaaossmpsC1.b1 --start 2023-01-01 --end 2023-12-31 --out data/smps
-python arm_ena_nd_pnsd.py download --ds enametC1.b1 --start 2023-01-01 --end 2023-12-31 --out data/met
-python arm_ena_nd_pnsd.py build --nd-dir data/ndrop --psd-dir data/smps --met-dir data/met --out ena_2023_smps.nc
-python arm_ena_nd_pnsd.py quicklook ena_2023_smps.nc --min-cloud-frac 0.5 --max-rel-err 0.5
+python arm_ena_nd_pnsd.py download --ds enandropmfrsrC1.c1 --start 2023-01-01 --end 2023-12-31 --out data/arm/ena/ndrop
+python arm_ena_nd_pnsd.py download --ds enaaossmpsC1.b1 --start 2023-01-01 --end 2023-12-31 --out data/arm/ena/smps
+python arm_ena_nd_pnsd.py download --ds enametC1.b1 --start 2023-01-01 --end 2023-12-31 --out data/arm/ena/met
+python arm_ena_nd_pnsd.py build --nd-dir data/arm/ena/ndrop --psd-dir data/arm/ena/smps --met-dir data/arm/ena/met --out results/ena/ena_2023_smps.nc
+python arm_ena_nd_pnsd.py quicklook results/ena/ena_2023_smps.nc --min-cloud-frac 0.5 --max-rel-err 0.5
 ```
 
 Other sites: `discover --site sgp` or `--site asi` (LASIC), and `build --site-name "..."`.
@@ -53,3 +54,14 @@ Data are not included. ARM data: cite each datastream DOI (shown on its ARM
 Data Discovery page) and acknowledge the ARM user facility (US DOE Office of
 Science). EPCAPE Mt. Soledad data (UCSD Library, CC BY 4.0): the authors ask to
 be consulted before publication.
+
+## Folder layout
+
+```
+data/arm/<site>/{ndrop,smps,uhsas,met}   raw ARM files
+data/cloudnet/<site>/{der,lwc}           raw Cloudnet files
+data/ebas/                               EBAS size distributions
+data/epcape_soledad/                     UCSD fog monitor and SEMS
+results/<site>/                          built files and quicklooks (not in git)
+docs/                                    tracking spreadsheet (not in git)
+```

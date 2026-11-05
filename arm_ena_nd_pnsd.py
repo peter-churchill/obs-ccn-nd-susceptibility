@@ -821,6 +821,36 @@ def susceptibility_table(ccn, y, diam, n_bins=None):
     return tab, d_delta_from(delta, diam)
 
 
+def _partial_lwp(ds, m, times, x100, y, n_boot, seed=1):
+    """Unbinned slope of log Nd on log CCN(100 nm), with and without log LWP as a
+    second predictor. Retrievals that scale Nd with LWP (Cloudnet N_scaled, and
+    partly NDROP) can share LWP variability with Nd; the partial slope removes it."""
+    if "lwp_meas" not in ds:
+        return
+    lwp = ds["lwp_meas"].values[m] * 1000.0                      # g m-2
+    ok = (y > 0) & (x100 > 0) & (lwp > 5) & np.isfinite(y) & np.isfinite(x100)
+    if ok.sum() < 30:
+        return
+    lx, ly, ll = np.log10(x100[ok]), np.log10(y[ok]), np.log10(lwp[ok])
+    day = pd.DatetimeIndex(times[ok]).normalize().to_numpy()
+
+    def fit(idx):
+        X = np.c_[np.ones(idx.size), lx[idx], ll[idx]]
+        c = np.linalg.lstsq(X, ly[idx], rcond=None)[0]
+        return np.polyfit(lx[idx], ly[idx], 1)[0], c[1], c[2]
+
+    simple, partial, beta = fit(np.arange(lx.size))
+    rng = np.random.default_rng(seed)
+    days = np.unique(day)
+    groups = [np.where(day == d)[0] for d in days]
+    boots = np.array([fit(np.concatenate([groups[k] for k in rng.integers(0, len(groups), len(groups))]))
+                      for _ in range(max(n_boot, 100))])
+    lo, hi = np.nanpercentile(boots[:, 1], [2.5, 97.5])
+    print(f"Unbinned slope at 100 nm: {simple:.3f}; controlling for log LWP: {partial:.3f} "
+          f"[{lo:.3f}, {hi:.3f}] (LWP exponent {beta:.2f}, r(logNd, logLWP) = "
+          f"{np.corrcoef(ly, ll)[0, 1]:.2f}, n = {ok.sum()})")
+
+
 def bootstrap_by_day(times, ccn, y, diam, n_boot, n_bins=None, cut_idx=None, seed=0):
     """Day-block bootstrap of S(D) and D_Delta.
 
@@ -886,6 +916,14 @@ def _base_mask(ds, args):
             notes.append(f"LWP >= {args.min_lwp} g m-2")
         else:
             print("Note: no lwp_meas in file; --min-lwp ignored.")
+    for opt, var, label in ((args.max_cloud_base, "cloud_base_height", "cloud base"),
+                            (args.max_cloud_top, "cloud_top_height", "cloud top")):
+        if opt is not None:
+            if var in ds:
+                m &= ds[var].values <= opt
+                notes.append(f"{label} <= {opt:.0f} m")
+            else:
+                print(f"Note: no {var} in file; the {label} screen is ignored.")
     if args.coupled_only:
         if "decoupling_dz" in ds:
             m &= ds["decoupling_dz"].values <= args.dz_coupled
@@ -945,6 +983,7 @@ def cmd_quicklook(args):
               f"({np.isfinite(dd_boot).mean():.0%} of resamples have a crossing)")
     else:
         print("D_Delta: no zero crossing in range")
+    _partial_lwp(ds, m, t_m, ccn[:, i100], y, args.n_boot)
 
     # 3. Regime comparison: coupling and cloud-base height.
     groups = []
@@ -1078,6 +1117,10 @@ def main(argv=None):
                    help="noise screen: keep hours with NDROP error / Nd <= this (e.g. 0.5)")
     q.add_argument("--min-lwp", type=float, default=None,
                    help="keep hours with measured LWP >= this, in g m-2 (e.g. 50)")
+    q.add_argument("--max-cloud-base", type=float, default=None,
+                   help="keep hours with retrieval cloud base <= this (m), e.g. 2000 for boundary-layer cloud")
+    q.add_argument("--max-cloud-top", type=float, default=None,
+                   help="keep hours with retrieval cloud top <= this (m), e.g. 3000")
     q.add_argument("--coupled-only", action="store_true",
                    help="keep hours with cloud base - LCL <= --dz-coupled (needs build --met-dir)")
     q.add_argument("--dz-coupled", type=float, default=150.0,
