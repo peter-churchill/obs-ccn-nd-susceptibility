@@ -5,7 +5,9 @@ Inputs (one folder each, files from arm_ena_nd_pnsd.py download):
     --cloud-dir    <site>aafmergedcldsdF1.c1  merged FCDP+2DS+HVPS size distribution, 1 Hz
                    (or <site>aaffcdpF1.c1 for campaigns without the merged product)
     --aerosol-dir  <site>aafmergedaerosolsdF1.c1  merged FIMS/PCASP/CAS size distribution, 1 Hz
-                   with cloud_flag and cvi_flag
+                   with cloud_flag and cvi_flag; or a single probe for campaigns without it:
+                   <site>aafuhsasF1.b1 (60-1000 nm), <site>aaffimsF1.b1 (10-~500 nm, heated_flag
+                   used), <site>aafpcaspF1.b1 (~100-3000 nm, cloud_flag and data_flag used)
 
 Method, per flight:
  1. In-cloud seconds: droplet number (2-50 um, so drizzle is excluded) >= --min-nd and
@@ -23,11 +25,17 @@ Output has the same layout as the other builds (CDNC, CCN(radius), cloud_frac = 
 per cloud pass, so `arm_ena_nd_pnsd.py quicklook` runs on it unchanged. The day-block
 bootstrap there resamples whole flights (one flight per day).
 
-Example
--------
+Aerosol seconds near droplets (>= --clear-nd cm-3 within 2 s, from the cloud probe) are
+always dropped, so single probes without a cloud flag are usable.
+
+Examples
+--------
 python aircraft_build.py --cloud-dir data/aircraft/ace-ena/enaaafmergedcldsdF1.c1 \\
     --aerosol-dir data/aircraft/ace-ena/enaaafmergedaerosolsdF1.c1 \\
     --site-name "ACE-ENA aircraft (G-1)" --out results/aircraft/ace-ena_aircraft.nc
+python aircraft_build.py --cloud-dir data/aircraft/acapex/acxaaffcdpF1.c1 \\
+    --aerosol-dir data/aircraft/acapex/acxaafuhsasF1.b1 \\
+    --site-name "ACAPEX aircraft (G-1, UHSAS)" --out results/aircraft/acapex_aircraft_uhsas.nc
 """
 import argparse
 import glob
@@ -85,35 +93,77 @@ def read_cloud(folder, dmin, dmax):
     return c[~c.index.duplicated()]
 
 
-def read_aerosol(folder):
-    """1-Hz dN/dlogDp (cm-3) for clear-air, isokinetic-inlet seconds, plus position."""
+AER_FLAGS = ("cloud_flag", "cvi_flag", "heated_flag", "data_flag")   # 0 = keep
+
+
+def read_aerosol(folder, cloud=None, clear_nd=1.0, pad_s=2, form="auto"):
+    """1-Hz dN/dlogDp (cm-3) for clear-air seconds, plus position, on one diameter grid.
+
+    Reads the merged aerosol product (number_concentration on geometric_diameter) and the
+    single probes (UHSAS: size_distribution on diameter_optical; PCASP: size_distribution on
+    optical_diameter; FIMS: number_concentration on geometric_diameter). Whether values are
+    per bin or dN/dlogDp is decided per file from total_number_concentration when present,
+    else from the long name. Seconds are dropped where any of AER_FLAGS is non-zero, and,
+    when `cloud` (the droplet-probe series) is given, within pad_s of a second with droplet
+    number >= clear_nd cm-3 (for probes without a cloud flag of their own).
+    """
     files = sorted(glob.glob(os.path.join(folder, "*.nc")) + glob.glob(os.path.join(folder, "*.cdf")))
     if not files:
         sys.exit(f"No files in {folder}")
-    frames, meta, dnm = [], [], None
+    frames, meta, grid, kept = [], [], None, {}
     for f in files:
         with xr.open_dataset(f) as ds:
-            b, dc = _diam_um(ds, "geometric_diameter")
-            a = ds["number_concentration"].values.astype(float)
+            var = next(v for v in ("number_concentration", "size_distribution") if v in ds)
+            dim = ds[var].dims[1]
+            b, dc = _diam_um(ds, dim)
+            a = ds[var].values.astype(float)
             a[a < 0] = np.nan
-            name = (str(ds["number_concentration"].attrs.get("long_name", "")) + " "
-                    + str(ds["number_concentration"].attrs.get("units", ""))).lower()
             dlog = np.log10(b[:, 1] / b[:, 0])
-            if "dlog" not in name:                                     # per-bin counts -> dN/dlogDp
+            name = (str(ds[var].attrs.get("long_name", "")) + " " + str(ds[var].attrs.get("units", ""))).lower()
+            per_bin = "dlog" not in name
+            if form != "auto":
+                per_bin = form == "per-bin"
+            elif "total_number_concentration" in ds:                      # decide from the file's own total
+                tot = ds["total_number_concentration"].values.astype(float)
+                good = np.isfinite(tot) & (tot > 0)
+                if good.sum() > 10:
+                    r_bin = np.nanmedian(np.nansum(a[good], axis=1) / tot[good])
+                    r_dlog = np.nanmedian(np.nansum(a[good] * dlog, axis=1) / tot[good])
+                    per_bin = abs(np.log(r_bin)) < abs(np.log(r_dlog))
+            if per_bin:
                 a = a / dlog[None, :]
             ok = np.ones(len(a), bool)
-            for flag in ("cloud_flag", "cvi_flag"):
+            for flag in AER_FLAGS:
                 if flag in ds:
-                    ok &= np.nan_to_num(ds[flag].values.astype(float), nan=1) == 0
+                    fk = np.nan_to_num(ds[flag].values.astype(float), nan=1) == 0
+                    if fk.mean() > 0.05:                                # ignore a flag with an unexpected sense
+                        ok &= fk
+                        kept.setdefault(flag, []).append(fk.mean())
             t = pd.DatetimeIndex(ds["time"].values)
+            if grid is None:
+                grid = dc * 1000.0                                      # nm, from the first file
+            if not np.allclose(dc * 1000.0, grid, rtol=0.02):           # interpolate onto the first grid
+                a = np.array([np.interp(np.log10(grid), np.log10(dc * 1000.0), row, left=np.nan, right=np.nan) for row in a])
             frames.append(pd.DataFrame(a[ok], index=t[ok]))
             meta.append(pd.DataFrame({"alt": ds["alt"].values[ok], "lat": ds["lat"].values[ok],
                                       "lon": ds["lon"].values[ok]}, index=t[ok]))
-            dnm = dc * 1000.0
     a = pd.concat(frames).sort_index()
     m = pd.concat(meta).sort_index()
     keep = ~a.index.duplicated()
-    return a[keep], m[keep], dnm
+    a, m = a[keep], m[keep]
+    msg = ", ".join(f"{k} keeps {np.mean(v):.0%}" for k, v in kept.items()) or "no flags in file"
+    how = "set by --aerosol-form" if form != "auto" else "auto-detected"
+    print(f"Aerosol probe: {os.path.basename(os.path.normpath(folder))}; "
+          f"values read as {'per-bin counts' if per_bin else 'dN/dlogDp'} ({how}); {msg}")
+    if cloud is not None:
+        wet = cloud.index[cloud["Nd"] >= clear_nd]
+        if len(wet):
+            ws = pd.Series(1, index=wet).resample("1s").max().fillna(0)
+            ws = ws.rolling(2 * pad_s + 1, center=True, min_periods=1).max()
+            hit = ws.reindex(a.index.floor("s")).fillna(0).to_numpy() > 0
+            print(f"  droplet-probe cloud mask (Nd >= {clear_nd} cm-3, +/- {pad_s} s) removes {hit.mean():.0%} of aerosol seconds")
+            a, m = a[~hit], m[~hit]
+    return a, m, grid
 
 
 def _km(lat1, lon1, lat2, lon2):
@@ -171,16 +221,22 @@ def main():
     ap.add_argument("--max-dist", type=float, default=50.0, help="km between pass and aerosol samples")
     ap.add_argument("--below-margin", type=float, default=50.0, help="m below cloud base for aerosol")
     ap.add_argument("--min-aer", type=int, default=30, help="s of below-cloud aerosol required")
+    ap.add_argument("--aerosol-form", choices=["auto", "per-bin", "dndlogdp"], default="auto",
+                    help="how the aerosol file stores its size distribution; auto uses the file's total "
+                         "concentration when present, else the long name")
+    ap.add_argument("--clear-nd", type=float, default=1.0,
+                    help="cm-3; drop aerosol seconds within 2 s of droplets above this (0 = off)")
     a = ap.parse_args()
 
     c = read_cloud(a.cloud_dir, a.nd_dmin, a.nd_dmax)
-    aer, am, dnm = read_aerosol(a.aerosol_dir)
+    aer, am, dnm = read_aerosol(a.aerosol_dir, cloud=c if a.clear_nd > 0 else None, clear_nd=a.clear_nd,
+                                form=a.aerosol_form)
     tot = aer.to_numpy() * np.gradient(np.log10(dnm))[None, :]
     print(f"Cloud probe: {len(c)} s on {c.index.normalize().nunique()} flights; "
           f"in cloud (Nd >= {a.min_nd}, LWC >= {a.min_lwc}): {((c.Nd >= a.min_nd) & (c.LWC >= a.min_lwc)).sum()} s; "
           f"median in-cloud Nd {c.Nd[(c.Nd >= a.min_nd) & (c.LWC >= a.min_lwc)].median():.0f} cm-3")
     print(f"Aerosol: {len(aer)} clear-air s, {dnm.min():.1f}-{dnm.max():.0f} nm, "
-          f"median N_tot {np.nanmedian(np.nansum(tot, axis=1)):.0f} cm-3 (sanity check: a few hundred at ENA)")
+          f"median N_tot {np.nanmedian(np.nansum(tot, axis=1)):.0f} cm-3 over the probe's range")
 
     p = cloud_passes(c, a)
     if p.empty:
