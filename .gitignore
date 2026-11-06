@@ -5,4 +5,6 @@
 !README.md
 !environment.yml
 !*.py
+!*.ipynb
 !*.ps1
+!*.sh

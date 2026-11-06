@@ -938,6 +938,11 @@ def cmd_quicklook(args):
     ds = xr.open_dataset(args.file)
     diam = ds["diameter"].values
     ccn_all, y_all = ds["CCN"].values, ds["CDNC"].values
+    if args.nd_scale != 1.0:
+        # Divide Nd by a calibration factor (e.g. Cloudnet / NDROP). S is unchanged;
+        # the closure diameter moves to where N(>D) equals the corrected Nd.
+        y_all = y_all / args.nd_scale
+        print(f"Nd divided by {args.nd_scale:g} before analysis (calibration factor).")
     times = ds["time"].values
     if np.isnan(ccn_all).all():
         sys.exit("Every CCN value is NaN - the size distribution did not cover the "
@@ -1117,6 +1122,8 @@ def main(argv=None):
                    help="noise screen: keep hours with NDROP error / Nd <= this (e.g. 0.5)")
     q.add_argument("--min-lwp", type=float, default=None,
                    help="keep hours with measured LWP >= this, in g m-2 (e.g. 50)")
+    q.add_argument("--nd-scale", type=float, default=1.0,
+                   help="divide Nd by this factor first, e.g. 1.8 for Cloudnet vs NDROP at SGP")
     q.add_argument("--max-cloud-base", type=float, default=None,
                    help="keep hours with retrieval cloud base <= this (m), e.g. 2000 for boundary-layer cloud")
     q.add_argument("--max-cloud-top", type=float, default=None,
