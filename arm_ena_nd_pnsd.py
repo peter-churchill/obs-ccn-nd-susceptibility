@@ -405,17 +405,30 @@ def read_nd(nd_dir, var, qc_mode, extra_pattern):
     return df
 
 
-def hourly_nd(df, min_cloud_frac):
-    """Hourly mean Nd over valid retrievals, kept only for cloudy hours.
+ND_HOURLY_STATS = ("median", "geomean", "mean")
+
+
+def hourly_nd(df, min_cloud_frac, stat="median"):
+    """Hourly Nd over valid retrievals, kept only for cloudy hours.
+
+    stat : 'median' (default; matches the Cloudnet and aircraft builds), 'geomean'
+        (geometric mean, i.e. the mean in log space used by the fit) or 'mean'
+        (arithmetic mean, the behaviour of builds before Nov 2026). Auxiliary
+        columns (LWP, error, cloud heights, ...) use the median unless stat is
+        'mean', in which case they keep the arithmetic mean.
 
     The cloud fraction is the number of valid retrievals in the hour divided by
     the number expected from the native time step, so it works whether the
     file stores every time step (with fill values) or only successful ones.
     """
+    if stat not in ND_HOURLY_STATS:
+        raise ValueError(f"stat must be one of {ND_HOURLY_STATS}")
     per_hour = _expected_per_hour(df.index.to_series())
     valid = df["Nd"].notna()
     g = df[valid].resample("1h")
-    out = g.mean()
+    out = g.mean() if stat == "mean" else g.median()
+    if stat == "geomean":
+        out["Nd"] = np.exp(np.log(df.loc[valid, "Nd"]).resample("1h").mean())
     out["cloud_frac"] = (g["Nd"].count() / per_hour).clip(upper=1.0)
     out = out[out["cloud_frac"] >= min_cloud_frac]
     out.attrs["samples_per_hour"] = per_hour
@@ -674,7 +687,7 @@ def cmd_build(args):
     cut_nm = 2.0 * radii
     nd_raw = read_nd(args.nd_dir, args.nd_var, args.qc, args.nd_extra)
     extra_attrs = nd_raw.attrs.get("extra_attrs", {})
-    nd = hourly_nd(nd_raw, args.min_cloud_frac)
+    nd = hourly_nd(nd_raw, args.min_cloud_frac, args.nd_hourly)
     counts = ", ".join(f">={t}: {(nd['cloud_frac'] >= t).sum()}"
                        for t in (0.3, 0.5, 0.8) if t >= args.min_cloud_frac)
     print(f"Nd: {len(nd_raw)} samples (~{nd.attrs['samples_per_hour']:.0f}/h) -> "
@@ -696,7 +709,8 @@ def cmd_build(args):
     ds = xr.Dataset(
         {
             "CDNC": ("time", nd["Nd"].to_numpy(),
-                     {"units": "cm-3", "long_name": "hourly mean retrieved Nd (NDROP)"}),
+                     {"units": "cm-3", "long_name": f"hourly {args.nd_hourly} of retrieved Nd (NDROP)",
+                      "hourly_statistic": args.nd_hourly}),
             "CCN": (("time", "radius"), ccn.to_numpy(),
                     {"units": "cm-3",
                      "long_name": "N(D > 2*radius) from hourly mean dN/dlogDp"}),
@@ -1104,6 +1118,9 @@ def main(argv=None):
                    help="floor for keeping an hour (the analysis threshold is "
                         "chosen in quicklook)")
     b.add_argument("--min-psd-frac", type=float, default=MIN_PSD_FRAC)
+    b.add_argument("--nd-hourly", choices=ND_HOURLY_STATS, default="median",
+                   help="how the 20-s Nd retrievals are combined into one hourly value "
+                        "(median matches Cloudnet and the aircraft; mean was used before Nov 2026)")
     b.add_argument("--site-name", default="ARM ENA (Graciosa, Azores)",
                    help="label stored in the file and used in plot titles")
     b.add_argument("--met-dir", default=None,

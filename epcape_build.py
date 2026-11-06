@@ -150,6 +150,9 @@ def main(argv=None):
     p.add_argument("--window-h", type=float, default=3.0, help="clear-air window, hours")
     p.add_argument("--min-scans", type=int, default=6)
     p.add_argument("--min-cloud-frac", type=float, default=0.3, help="floor for keeping an hour")
+    p.add_argument("--nd-hourly", choices=("median", "geomean", "mean"), default="median",
+                   help="how in-cloud 5-min Nd samples are combined into one hourly value "
+                        "(median matches the other builds; mean was used before Nov 2026)")
     a = p.parse_args(argv)
 
     radii = RADII_NM
@@ -157,7 +160,9 @@ def main(argv=None):
     fm = read_fm(a.fm)
     incloud = fm["LWC"] >= a.lwc_cloud
     g = fm[incloud].resample("1h")
-    hourly = g.mean()
+    hourly = g.mean() if a.nd_hourly == "mean" else g.median()
+    if a.nd_hourly == "geomean":
+        hourly["Nd"] = np.exp(np.log(fm.loc[incloud & (fm["Nd"] > 0), "Nd"]).resample("1h").mean())
     hourly["cloud_frac"] = (fm["LWC"].resample("1h").apply(
         lambda s: (s >= a.lwc_cloud).sum() / 12.0)).reindex(hourly.index)
     hourly = hourly[hourly["cloud_frac"] >= a.min_cloud_frac]
@@ -191,7 +196,7 @@ def main(argv=None):
 
     hh = hourly[ok]
     ds = xr.Dataset(
-        {"CDNC": ("time", hh["Nd"].to_numpy(), {"units": "cm-3", "long_name": "FM-120 Nd, mean over in-cloud 5-min samples"}),
+        {"CDNC": ("time", hh["Nd"].to_numpy(), {"units": "cm-3", "long_name": f"FM-120 Nd, hourly {a.nd_hourly} of in-cloud 5-min samples", "hourly_statistic": a.nd_hourly}),
          "CCN": (("time", "radius"), ccn[ok], {"units": "cm-3", "long_name": f"N(D > 2*radius), clear-air SEMS scans within +/-{a.window_h:g} h"}),
          "CCN_pre": (("time", "radius"), ccn_pre[ok], {"units": "cm-3", "long_name": f"as CCN, scans in the {a.window_h:g} h before the hour only"}),
          "cloud_frac": ("time", hh["cloud_frac"].to_numpy(), {"units": "1", "long_name": f"fraction of 5-min samples with LWC >= {a.lwc_cloud} g m-3"}),
