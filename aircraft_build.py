@@ -36,6 +36,11 @@ python aircraft_build.py --cloud-dir data/aircraft/ace-ena/enaaafmergedcldsdF1.c
 python aircraft_build.py --cloud-dir data/aircraft/acapex/acxaaffcdpF1.c1 \\
     --aerosol-dir data/aircraft/acapex/acxaafuhsasF1.b1 \\
     --site-name "ACAPEX aircraft (G-1, UHSAS)" --out results/aircraft/acapex_aircraft_uhsas.nc
+python aircraft_build.py --format activate --cloud-dir data/aircraft/activate/cloud \\
+    --aerosol-dir data/aircraft/activate/aerosol --site-name "ACTIVATE (HU-25 Falcon)" \\
+    --out results/aircraft/activate_aircraft.nc
+(ACTIVATE: FCDP 3-50 um droplets; SMPS 3-94 nm + LAS 94-3490 nm dry aerosol converted to ambient;
+ CVI-inlet seconds dropped; see activate_reader.py)
 """
 import argparse
 import glob
@@ -226,11 +231,25 @@ def main():
                          "concentration when present, else the long name")
     ap.add_argument("--clear-nd", type=float, default=1.0,
                     help="cm-3; drop aerosol seconds within 2 s of droplets above this (0 = off)")
+    ap.add_argument("--format", choices=["arm", "activate"], default="arm",
+                    help="arm: ARM netCDF (default); activate: NASA ACTIVATE ICARTT files "
+                         "(FCDP in --cloud-dir, LAS/SMPS/InletFlag in --aerosol-dir, 1-s merges in --merge-dir)")
+    ap.add_argument("--merge-dir", default=None,
+                    help="ACTIVATE 1-s merge folder for position (default: <cloud-dir>/../merge)")
+    ap.add_argument("--activate-stp", action="store_true",
+                    help="ACTIVATE: keep aerosol at STP instead of converting to ambient")
     a = ap.parse_args()
 
-    c = read_cloud(a.cloud_dir, a.nd_dmin, a.nd_dmax)
-    aer, am, dnm = read_aerosol(a.aerosol_dir, cloud=c if a.clear_nd > 0 else None, clear_nd=a.clear_nd,
-                                form=a.aerosol_form)
+    if a.format == "activate":
+        from activate_reader import read_cloud_activate, read_aerosol_activate
+        mdir = a.merge_dir or os.path.join(os.path.dirname(os.path.normpath(a.cloud_dir)), "merge")
+        c = read_cloud_activate(a.cloud_dir, a.nd_dmin, a.nd_dmax, mdir)
+        aer, am, dnm = read_aerosol_activate(a.aerosol_dir, mdir, cloud=c if a.clear_nd > 0 else None,
+                                             clear_nd=a.clear_nd, stp=a.activate_stp)
+    else:
+        c = read_cloud(a.cloud_dir, a.nd_dmin, a.nd_dmax)
+        aer, am, dnm = read_aerosol(a.aerosol_dir, cloud=c if a.clear_nd > 0 else None, clear_nd=a.clear_nd,
+                                    form=a.aerosol_form)
     tot = aer.to_numpy() * np.gradient(np.log10(dnm))[None, :]
     print(f"Cloud probe: {len(c)} s on {c.index.normalize().nunique()} flights; "
           f"in cloud (Nd >= {a.min_nd}, LWC >= {a.min_lwc}): {((c.Nd >= a.min_nd) & (c.LWC >= a.min_lwc)).sum()} s; "
