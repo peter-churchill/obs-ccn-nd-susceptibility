@@ -179,7 +179,7 @@ def read_aerosol_activate(aerosol_dir, merge_dir, cloud=None, clear_nd=1.0, pad_
         else:
             stats["no_inlet"] += 1
         m = nav.reindex(L2.index.floor("s"))
-        ok &= m["alt"].notna().to_numpy()
+        ok = ok & m["alt"].notna().to_numpy()   # new array: pandas may return a read-only view
         frames.append(pd.DataFrame(a[ok], index=L2.index[ok]))
         meta.append(pd.DataFrame(m.to_numpy()[ok], columns=["alt", "lat", "lon"], index=L2.index[ok]))
         stats["flights"] += 1
