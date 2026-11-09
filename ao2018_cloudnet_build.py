@@ -54,6 +54,25 @@ def _with_rain(cat, der_dir):
             ds[name].attrs = attrs
             ds[name].encoding = {}
             changed = True
+    # Also: current CloudnetPy reads lwp as kg m-2 without a unit check; the 2018 files store g m-2, which
+    # inflates N_scaled (proportional to LWP^2) by 1e6.
+    for name in ("lwp", "lwp_error"):
+        if name in ds and str(ds[name].attrs.get("units", "")).replace(" ", "").lower() in ("gm-2", "g/m2", "gm^-2", "g/m^2"):
+            at = dict(ds[name].attrs)
+            if "scale_factor" in at:                         # packed integers: rescale the factor, not the values
+                at["scale_factor"] = float(at["scale_factor"]) / 1000.0
+                if "add_offset" in at:
+                    at["add_offset"] = float(at["add_offset"]) / 1000.0
+            else:                                            # plain floats: divide, but keep fill values as they are
+                v = ds[name].values.astype("float64")
+                fill = at.get("_FillValue", at.get("missing_value"))
+                bad = ~np.isfinite(v) | ((v == fill) if fill is not None else False)
+                ds[name] = (ds[name].dims, np.where(bad, v, v / 1000.0).astype("float32"))
+            at["units"] = "kg m-2"
+            ds[name].attrs = at
+            ds[name].encoding = {}
+            _rain_note.add(f"{name} g m-2 -> kg m-2")
+            changed = True
     if not any(n in ds for n in RAIN_NAMES):
         src = next((n for n in ("is_rain", "rain", "rainrate") if n in ds), None)
         r = (np.nan_to_num(ds[src].values.astype(float)) > 0).astype("int8") if src else np.zeros(ds.sizes["time"], "int8")
@@ -69,7 +88,7 @@ def _with_rain(cat, der_dir):
     return tmp
 
 
-def make_der(cat_dir, der_dir):
+def make_der(cat_dir, der_dir, force=False):
     from cloudnetpy.products import generate_der
     os.makedirs(der_dir, exist_ok=True)
     cats = sorted(glob.glob(os.path.join(cat_dir, "**", "*.nc"), recursive=True))
@@ -80,7 +99,7 @@ def make_der(cat_dir, der_dir):
         if not m:
             continue
         out = os.path.join(der_dir, f"{m.group(1)}_ao2018_der.nc")
-        if os.path.exists(out):
+        if os.path.exists(out) and not force:
             skipped += 1
             continue
         try:
@@ -95,7 +114,7 @@ def make_der(cat_dir, der_dir):
     if os.path.exists(tmp):
         os.remove(tmp)
     print(f"der: {len(cats)} categorize files; generated {made}, existing {skipped}, failed {failed}"
-          + (f"; rain flag taken from: {', '.join(sorted(_rain_note))}" if _rain_note else "")
+          + (f"; compatibility fixes: {', '.join(sorted(_rain_note))}" if _rain_note else "")
           + (f"\n  first failure: {first_err}" if first_err else ""))
 
 
@@ -103,6 +122,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--categorize-dir", required=True)
     p.add_argument("--der-dir", default="data/ao2018/cloudnet/der_generated")
+    p.add_argument("--force", action="store_true", help="regenerate der files that already exist")
     p.add_argument("--dmps", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--min-pixels", type=int, default=3)
@@ -114,7 +134,7 @@ def main():
     p.add_argument("--spike-factor", type=float, default=3.0)
     a = p.parse_args()
 
-    make_der(a.categorize_dir, a.der_dir)
+    make_der(a.categorize_dir, a.der_dir, a.force)
     nd = read_der(a.der_dir, a.min_pixels, a.max_base, a.n_range, a.nd_stat)
     nd = nd[nd.cloud_frac >= a.min_cloud_frac]
     dm, dnm = read_dmps(a.dmps)
