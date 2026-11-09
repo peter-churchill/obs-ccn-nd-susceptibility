@@ -147,7 +147,7 @@ def read_aerosol(folder, cloud=None, clear_nd=1.0, pad_s=2, form="auto"):
             t = pd.DatetimeIndex(ds["time"].values)
             if grid is None:
                 grid = dc * 1000.0                                      # nm, from the first file
-            if not np.allclose(dc * 1000.0, grid, rtol=0.02):           # interpolate onto the first grid
+            if len(dc) != len(grid) or not np.allclose(dc * 1000.0, grid, rtol=0.02):           # interpolate onto the first grid
                 a = np.array([np.interp(np.log10(grid), np.log10(dc * 1000.0), row, left=np.nan, right=np.nan) for row in a])
             frames.append(pd.DataFrame(a[ok], index=t[ok]))
             meta.append(pd.DataFrame({"alt": ds["alt"].values[ok], "lat": ds["lat"].values[ok],
@@ -191,7 +191,7 @@ def cloud_passes(c, a):
         dur = (g.index[-1] - g.index[0]).total_seconds() + 1
         if len(g) < a.seg_min:
             continue
-        rows.append({"time": g.index[0] + (g.index[-1] - g.index[0]) / 2, "Nd": g["Nd"].median(),
+        rows.append({"time": g.index[0] + (g.index[-1] - g.index[0]) / 2, "Nd": g["Nd"].mean() if a.nd_stat == "mean" else g["Nd"].median(),
                      "Nd_iqr_ratio": g["Nd"].quantile(.75) / max(g["Nd"].quantile(.25), 1e-9),
                      "LWC": g["LWC"].median(), "alt": g["alt"].median(), "lat": g["lat"].median(),
                      "lon": g["lon"].median(), "duration_s": dur, "n_s": len(g)})
@@ -236,6 +236,8 @@ def main():
                          "(FCDP in --cloud-dir, LAS/SMPS/InletFlag in --aerosol-dir, 1-s merges in --merge-dir)")
     ap.add_argument("--merge-dir", default=None,
                     help="ACTIVATE 1-s merge folder for position (default: <cloud-dir>/../merge)")
+    ap.add_argument("--nd-stat", choices=["mean", "median"], default="mean",
+                    help="how the 1-Hz in-cloud seconds of a pass are combined into its Nd (mean = in-cloud average as in the models; at ENA the hourly-mean NDROP matched the aircraft, the median was about 40 per cent low)")
     ap.add_argument("--activate-stp", action="store_true",
                     help="ACTIVATE: keep aerosol at STP instead of converting to ambient")
     a = ap.parse_args()
@@ -294,7 +296,7 @@ def main():
           f"aerosol median {d.aer_dt_s.median() / 60:.0f} min and {d.aer_dist_km.median():.0f} km from the pass")
 
     ds = xr.Dataset(
-        {"CDNC": ("time", d["Nd"].to_numpy(), {"units": "cm-3", "long_name": f"median in-cloud droplet number, {a.nd_dmin:g}-{a.nd_dmax:g} um, per cloud pass"}),
+        {"CDNC": ("time", d["Nd"].to_numpy(), {"units": "cm-3", "long_name": f"{a.nd_stat} in-cloud droplet number, {a.nd_dmin:g}-{a.nd_dmax:g} um, per cloud pass"}),
          "CCN": (("time", "radius"), ccn, {"units": "cm-3", "long_name": "N(D > 2*radius), median below-cloud size distribution"}),
          "cloud_frac": ("time", np.ones(len(d)), {"units": "1", "long_name": "every row is an in-cloud pass"}),
          "dNdlogDp": (("time", "aerosol_diameter"), pnsd, {"units": "cm-3", "long_name": "median below-cloud dN/dlogDp"}),
