@@ -150,9 +150,9 @@ def main(argv=None):
     p.add_argument("--window-h", type=float, default=3.0, help="clear-air window, hours")
     p.add_argument("--min-scans", type=int, default=6)
     p.add_argument("--min-cloud-frac", type=float, default=0.3, help="floor for keeping an hour")
-    p.add_argument("--nd-hourly", choices=("median", "geomean", "mean"), default="median",
+    p.add_argument("--nd-hourly", choices=("median", "geomean", "mean"), default="mean",
                    help="how in-cloud 5-min Nd samples are combined into one hourly value "
-                        "(median matches the other builds; mean was used before Nov 2026)")
+                        "(mean = in-cloud average as in the models; at ENA the hourly-mean NDROP matched the aircraft, the median was about 40 per cent low; median kept as a sensitivity option)")
     a = p.parse_args(argv)
 
     radii = RADII_NM

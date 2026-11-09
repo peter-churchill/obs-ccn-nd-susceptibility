@@ -8,3 +8,4 @@
 !*.ipynb
 !*.ps1
 !*.sh
+!*.sbatch

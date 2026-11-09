@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from arm_ena_nd_pnsd import RADII_NM, cumulative_above, read_psd_hourly  # noqa: E402
 
 
-def read_der(der_dir, min_pixels, max_base, n_range):
+def read_der(der_dir, min_pixels, max_base, n_range, stat="mean"):
     files = sorted(glob.glob(os.path.join(der_dir, "*_der.nc")))
     if not files:
         sys.exit(f"No *_der.nc files in {der_dir}")
@@ -68,7 +68,7 @@ def read_der(der_dir, min_pixels, max_base, n_range):
     per_hour = 3600.0 / (dt_s or 30.0)
     g = prof.groupby(prof.index.floor("h"))
     hourly = pd.DataFrame({
-        "Nd": g["N"].median(),
+        "Nd": g["N"].mean() if stat == "mean" else g["N"].median(),
         "cloud_frac": g["N"].size() / per_hour,
         "cloud_base_height": g["base"].median(),
         "cloud_top_height": g["top"].median(),
@@ -144,10 +144,12 @@ def main():
     p.add_argument("--max-base", type=float, default=2500.0, help="m above ground")
     p.add_argument("--n-range", type=float, nargs=2, default=[1.0, 3000.0], help="cm-3")
     p.add_argument("--min-cloud-frac", type=float, default=0.3)
+    p.add_argument("--nd-stat", choices=["mean", "median"], default="mean",
+                   help="how valid profiles are combined into hourly Nd (mean = in-cloud average as in the models; at ENA the hourly-mean NDROP matched the aircraft, the median was about 40 per cent low)")
     a = p.parse_args()
 
     cut_nm = 2.0 * RADII_NM
-    nd = read_der(a.der_dir, a.min_pixels, a.max_base, a.n_range)
+    nd = read_der(a.der_dir, a.min_pixels, a.max_base, a.n_range, a.nd_stat)
     nd = nd[nd.cloud_frac >= a.min_cloud_frac]
     if len(a.psd) == 1 and os.path.isdir(a.psd[0]):
         # An ARM size-distribution folder (e.g. data/sgp/smps): use the ARM reader.
@@ -163,7 +165,7 @@ def main():
 
     ds = xr.Dataset(
         {"CDNC": ("time", nd["Nd"].to_numpy(),
-                  {"units": "cm-3", "long_name": "hourly median Cloudnet N_scaled (scaled Frisch)"}),
+                  {"units": "cm-3", "long_name": f"hourly {a.nd_stat} Cloudnet N_scaled (scaled Frisch)"}),
          "CCN": (("time", "radius"), ccn.to_numpy(),
                  {"units": "cm-3", "long_name": "N(D > 2*radius) from hourly dN/dlogDp (EBAS)"}),
          "cloud_frac": ("time", nd["cloud_frac"].to_numpy(),

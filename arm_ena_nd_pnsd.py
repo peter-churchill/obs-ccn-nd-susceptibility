@@ -408,7 +408,7 @@ def read_nd(nd_dir, var, qc_mode, extra_pattern):
 ND_HOURLY_STATS = ("median", "geomean", "mean")
 
 
-def hourly_nd(df, min_cloud_frac, stat="median"):
+def hourly_nd(df, min_cloud_frac, stat="mean"):
     """Hourly Nd over valid retrievals, kept only for cloudy hours.
 
     stat : 'median' (default; matches the Cloudnet and aircraft builds), 'geomean'
@@ -780,6 +780,8 @@ def binned_loglog(x, y, n_bins):
     order = np.argsort(lx)
     xb = [np.median(c) for c in np.array_split(lx[order], n_bins)]
     yb = [np.median(c) for c in np.array_split(ly[order], n_bins)]
+    if np.ptp(xb) == 0:                     # all x in one value (e.g. a cutoff where every hour is 0)
+        return (np.nan, np.nan, np.nan, int(lx.size))
     res = linregress(xb, yb)
     return (res.slope, res.intercept, res.rvalue, int(lx.size))
 
@@ -1118,9 +1120,9 @@ def main(argv=None):
                    help="floor for keeping an hour (the analysis threshold is "
                         "chosen in quicklook)")
     b.add_argument("--min-psd-frac", type=float, default=MIN_PSD_FRAC)
-    b.add_argument("--nd-hourly", choices=ND_HOURLY_STATS, default="median",
+    b.add_argument("--nd-hourly", choices=ND_HOURLY_STATS, default="mean",
                    help="how the 20-s Nd retrievals are combined into one hourly value "
-                        "(median matches Cloudnet and the aircraft; mean was used before Nov 2026)")
+                        "(mean = in-cloud average as in the models; at ENA the hourly-mean NDROP matched the aircraft, the median was about 40 per cent low; median kept as a sensitivity option)")
     b.add_argument("--site-name", default="ARM ENA (Graciosa, Azores)",
                    help="label stored in the file and used in plot titles")
     b.add_argument("--met-dir", default=None,
