@@ -32,9 +32,16 @@ def _get_json(path, params):
 
 
 def file_list(site, product, start, end):
-    """Newest version of each file; the API returns only current versions by default."""
-    return _get_json("files", {"site": site, "product": product,
-                               "dateFrom": start, "dateTo": end})
+    """Newest version of each file, one per date. Legacy files (processed with the old Cloudnet software, e.g.
+    MOSAiC/Polarstern) are included, but a current file is preferred when a date has both."""
+    files = _get_json("files", {"site": site, "product": product, "dateFrom": start, "dateTo": end,
+                                "showLegacy": "true"})
+    best = {}
+    for f in files:
+        d = f.get("measurementDate")
+        if d not in best or (best[d].get("legacy", False) and not f.get("legacy", False)):
+            best[d] = f
+    return [best[d] for d in sorted(best)]
 
 
 def cmd_list(a):
