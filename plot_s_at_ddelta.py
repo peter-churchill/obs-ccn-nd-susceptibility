@@ -22,7 +22,8 @@ import numpy as np
 import pandas as pd
 
 # file-name regex -> (label, regime, method, quality); first match wins. Quality as in the Synthesis sheet of
-# docs/observation_options.xlsx (docs/ is not in git). Instrument choices follow the synthesis rows.
+# docs/observation_options.xlsx (docs/ is not in git). Instrument choices follow the synthesis rows; the NDROP ground
+# sites use the NDROP error screen as in the synthesis (quicklook --max-rel-err 0.5, files *_relerr_quicklook.*).
 SOURCES = [
     (r"/ao2018_fog_clean_", "AO2018 fog (FSSP)", "Arctic", "Ship in situ", "slope only"),
     (r"/ao2018_cvi_residual_clean_", "AO2018 fog (residuals)", "Arctic", "Ship in situ", "slope only"),
@@ -36,12 +37,12 @@ SOURCES = [
     (r"/cacti_aircraft_mergedaerosolsd_quicklook", "CACTI", "Continental", "Aircraft", "robust"),
     (r"/goamazon_aircraft_pcasp_quicklook", "GoAmazon", "Continental", "Aircraft", "moderate"),
     (r"/sgp_cloudnet_quicklook", "SGP (Cloudnet)", "Continental", "Cloudnet", "Nd unverified"),
-    (r"/ena_2014_2023_uhsas_quicklook", "ENA (UHSAS)", "Marine", "Ground NDROP", "robust"),
-    (r"/ena_2022_2026_smps_quicklook", "ENA (SMPS 2022-26)", "Marine", "Ground NDROP", "moderate"),
-    (r"/sgp_2016_2025_smps_quicklook", "SGP", "Continental", "Ground NDROP", "moderate"),
+    (r"/ena_2014_2023_uhsas_relerr_quicklook", "ENA (UHSAS)", "Marine", "Ground NDROP", "robust"),
+    (r"/ena_2022_2026_smps_relerr_quicklook", "ENA (SMPS 2022-26)", "Marine", "Ground NDROP", "moderate"),
+    (r"/sgp_2016_2025_smps_relerr_quicklook", "SGP", "Continental", "Ground NDROP", "moderate"),
     (r"/lasic_2016_2017_smps_quicklook", "LASIC (SMPS)", "Marine", "Ground NDROP", "slope only"),
     (r"/lasic_2016_2017_uhsas_quicklook", "LASIC (UHSAS)", "Marine", "Ground NDROP", "slope only"),
-    (r"/epc_2023_2024_smps_quicklook", "EPCAPE pier", "Marine", "Ground NDROP", "moderate"),
+    (r"/epc_2023_2024_smps_relerr_quicklook", "EPCAPE pier", "Marine", "Ground NDROP", "moderate"),
     (r"/epcape_soledad_hourly_quicklook", "EPCAPE Mt Soledad", "Marine", "Ground in situ", "low"),
     (r"/puijo", "Puijo", "Boreal", "Ground in situ", "robust"),
     (r"/pallas", "Pallas", "Boreal", "Ground in situ", "robust"),

@@ -1127,7 +1127,8 @@ def cmd_quicklook(args):
     fig.suptitle(f"{site} {tsel.min():%b %Y} - {tsel.max():%b %Y}: {m.sum()} h on {n_days} days, "
                  f"cloud_frac >= {args.min_cloud_frac}{sub}", fontsize=10)
     fig.tight_layout()
-    stem = os.path.splitext(args.file)[0] + (f"_sza{args.max_sza:g}" if getattr(args, "max_sza", None) is not None else "")
+    stem = (os.path.splitext(args.file)[0] + (f"_{args.tag}" if getattr(args, "tag", None) else "")
+            + (f"_sza{args.max_sza:g}" if getattr(args, "max_sza", None) is not None else ""))
     png = stem + "_quicklook.png"
     fig.savefig(png, dpi=150)
     tab.to_csv(stem + "_quicklook.csv", index=False)
@@ -1210,6 +1211,8 @@ def main(argv=None):
                    help="coupling threshold on cloud base - LCL, m (default 150)")
     q.add_argument("--cb-split", type=float, default=None,
                    help="cloud-base height (m) splitting low/high bases (default: median)")
+    q.add_argument("--tag", default=None,
+                   help="suffix for the output table and figure, e.g. relerr -> <file>_relerr_quicklook.csv")
     q.add_argument("--max-sza", type=float, default=None,
                    help="keep hours with solar zenith angle <= this (deg), e.g. 60; for NDROP (MFRSR tau). "
                         "Outputs get a _sza<value> suffix")
