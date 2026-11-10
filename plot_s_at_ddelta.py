@@ -37,13 +37,13 @@ SOURCES = [
     (r"/hi-scale_aircraft_mergedaerosolsd_quicklook", "HI-SCALE", "Continental", "Aircraft", "robust"),
     (r"/cacti_aircraft_mergedaerosolsd_quicklook", "CACTI", "Continental", "Aircraft", "robust"),
     (r"/goamazon_aircraft_pcasp_quicklook", "GoAmazon", "Continental", "Aircraft", "moderate"),
-    (r"/ena_cloudnet_quicklook", "ENA (Cloudnet)", "Marine", "Cloudnet", "moderate"),
+    (r"/ena_cloudnet_smps_quicklook", "ENA (Cloudnet, SMPS)", "Marine", "Cloudnet", "moderate"),
     (r"/sgp_cloudnet_quicklook", "SGP (Cloudnet)", "Continental", "Cloudnet", "moderate"),
-    (r"/ena_2014_2023_uhsas_relerr_quicklook", "ENA (UHSAS)", "Marine", "Ground NDROP", "robust"),
+    (r"/ena_2014_2023_uhsas_relerr_quicklook", "ENA (UHSAS)", "Marine", "Ground NDROP", "parked"),
     (r"/ena_2022_2026_smps_relerr_quicklook", "ENA (SMPS 2022-26)", "Marine", "Ground NDROP", "moderate"),
     (r"/sgp_2016_2025_smps_relerr_quicklook", "SGP", "Continental", "Ground NDROP", "moderate"),
     (r"/lasic_2016_2017_smps_quicklook", "LASIC (SMPS)", "Marine", "Ground NDROP", "slope only"),
-    (r"/lasic_2016_2017_uhsas_quicklook", "LASIC (UHSAS)", "Marine", "Ground NDROP", "slope only"),
+    (r"/lasic_2016_2017_uhsas_quicklook", "LASIC (UHSAS)", "Marine", "Ground NDROP", "parked"),
     (r"/epc_2023_2024_smps_relerr_quicklook", "EPCAPE pier", "Marine", "Ground NDROP", "moderate"),
     (r"/epcape_soledad_hourly_quicklook", "EPCAPE Mt Soledad", "Marine", "Ground in situ", "low"),
     (r"/puijo", "Puijo", "Boreal", "Ground in situ", "robust"),
@@ -122,6 +122,8 @@ def main():
             unmatched.append(p)
             continue
         _, label, regime, method, quality = src
+        if quality == "parked":                              # UHSAS where an SMPS/DMPS exists (SMPS preferred)
+            continue
         if label in seen:
             print(f"  (second file for {label}, skipped: {p})")
             continue
