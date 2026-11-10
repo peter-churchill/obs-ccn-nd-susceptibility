@@ -21,7 +21,8 @@ import re
 import numpy as np
 import pandas as pd
 
-# file-name regex -> (label, regime, method, quality); first match wins. Quality as in the Synthesis sheet of
+# file-name regex -> (label, regime, method, quality); first match wins. Cloudnet sites with >= 100 good hours are
+# 'moderate' (low: fewer hours, or Arctic sites where in-situ checks show Nd biased high). Quality as in the Synthesis sheet of
 # docs/observation_options.xlsx (docs/ is not in git). Instrument choices follow the synthesis rows; the NDROP ground
 # sites use the NDROP error screen as in the synthesis (quicklook --max-rel-err 0.5, files *_relerr_quicklook.*).
 SOURCES = [
@@ -36,7 +37,8 @@ SOURCES = [
     (r"/hi-scale_aircraft_mergedaerosolsd_quicklook", "HI-SCALE", "Continental", "Aircraft", "robust"),
     (r"/cacti_aircraft_mergedaerosolsd_quicklook", "CACTI", "Continental", "Aircraft", "robust"),
     (r"/goamazon_aircraft_pcasp_quicklook", "GoAmazon", "Continental", "Aircraft", "moderate"),
-    (r"/sgp_cloudnet_quicklook", "SGP (Cloudnet)", "Continental", "Cloudnet", "Nd unverified"),
+    (r"/ena_cloudnet_quicklook", "ENA (Cloudnet)", "Marine", "Cloudnet", "moderate"),
+    (r"/sgp_cloudnet_quicklook", "SGP (Cloudnet)", "Continental", "Cloudnet", "moderate"),
     (r"/ena_2014_2023_uhsas_relerr_quicklook", "ENA (UHSAS)", "Marine", "Ground NDROP", "robust"),
     (r"/ena_2022_2026_smps_relerr_quicklook", "ENA (SMPS 2022-26)", "Marine", "Ground NDROP", "moderate"),
     (r"/sgp_2016_2025_smps_relerr_quicklook", "SGP", "Continental", "Ground NDROP", "moderate"),
@@ -47,22 +49,22 @@ SOURCES = [
     (r"/puijo", "Puijo", "Boreal", "Ground in situ", "robust"),
     (r"/pallas", "Pallas", "Boreal", "Ground in situ", "robust"),
     (r"/zeppelin", "Zeppelin", "Arctic", "Ground in situ", "robust"),
-    (r"/hyytiala_cloudnet", "Hyytiala", "Boreal", "Cloudnet", "Nd unverified"),
-    (r"/kenttarova_cloudnet", "Kenttarova", "Boreal", "Cloudnet", "Nd unverified"),
-    (r"/norunda_cloudnet", "Norunda", "Boreal", "Cloudnet", "Nd unverified"),
-    (r"/mace-head_cloudnet", "Mace Head", "Marine", "Cloudnet", "low"),
+    (r"/hyytiala_cloudnet", "Hyytiala", "Boreal", "Cloudnet", "moderate"),
+    (r"/kenttarova_cloudnet", "Kenttarova", "Boreal", "Cloudnet", "moderate"),
+    (r"/norunda_cloudnet", "Norunda", "Boreal", "Cloudnet", "moderate"),
+    (r"/mace-head_cloudnet", "Mace Head", "Marine", "Cloudnet", "moderate"),
     (r"/maido_cloudnet", "Maido", "Marine", "Cloudnet", "low"),
     (r"/ny-alesund_cloudnet", "Ny-Alesund", "Arctic", "Cloudnet", "low"),
     (r"/oliktok_cloudnet", "Oliktok", "Arctic", "Cloudnet", "low"),
     (r"/mosaic_cloudnet_smps", "MOSAiC (Cloudnet, SMPS)", "Arctic", "Cloudnet", "low"),
     (r"/andoya_cloudnet", "Andoya (Cloudnet)", "Arctic", "Cloudnet", "low"),
     (r"/bankhead_cloudnet", "Bankhead", "Continental", "Cloudnet", "low"),
-    (r"/cabauw_cloudnet", "Cabauw", "Continental", "Cloudnet", "low"),
-    (r"/granada_cloudnet", "Granada", "Continental", "Cloudnet", "low"),
+    (r"/cabauw_cloudnet", "Cabauw", "Continental", "Cloudnet", "moderate"),
+    (r"/granada_cloudnet", "Granada", "Continental", "Cloudnet", "moderate"),
     (r"/palaiseau_cloudnet", "Palaiseau", "Continental", "Cloudnet", "low"),
     (r"/schneefernerhaus_cloudnet", "Schneefernerhaus", "Continental", "Cloudnet", "low"),
-    (r"/bucharest_cloudnet", "Bucharest", "Continental", "Cloudnet", "Nd unverified"),
-    (r"/melpitz_cloudnet", "Melpitz", "Continental", "Cloudnet", "Nd unverified"),
+    (r"/bucharest_cloudnet", "Bucharest", "Continental", "Cloudnet", "moderate"),
+    (r"/melpitz_cloudnet", "Melpitz", "Continental", "Cloudnet", "moderate"),
 ]
 SKIP = [r"pilot_", r"_median", r"_orig", r"_sza\d", r"/ena_2023_", r"pnsd_"]
 REG_COL = {"Marine": "#1f77b4", "Marine CAO": "#17becf", "Boreal": "#2ca02c", "Arctic": "#9467bd", "Continental": "#d62728"}
