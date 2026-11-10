@@ -914,6 +914,51 @@ def _ci(a):
     return (np.percentile(a, 2.5), np.percentile(a, 97.5)) if a.size >= 20 else (np.nan, np.nan)
 
 
+# Site coordinates for the solar zenith angle (matched on the file name first, then on attrs["site"];
+# some median rebuilds carry a wrong "ARM ENA" site attribute).
+SITE_LATLON = {"ena": (39.0916, -28.0257), "graciosa": (39.0916, -28.0257),
+               "sgp": (36.607, -97.488), "southern great plains": (36.607, -97.488),
+               "lasic": (-7.967, -14.350), "ascension": (-7.967, -14.350),
+               "soledad": (32.840, -117.253), "epc": (32.867, -117.257), "scripps": (32.867, -117.257)}
+
+
+def site_latlon(path, ds, override=None):
+    """(lat, lon) for a built file, or None."""
+    if override:
+        return tuple(override)
+    name = os.path.basename(path).lower()
+    for key in ("soledad", "lasic", "sgp", "epc", "ena"):              # order matters: 'soledad' before 'epc'
+        if re.search(rf"(^|[_/]){key}[_.]", name) or name.startswith(key):
+            return SITE_LATLON[key]
+    site = str(ds.attrs.get("site", "")).lower()
+    for key, ll in SITE_LATLON.items():
+        if key in site:
+            return ll
+    return None
+
+
+def solar_zenith(times, lat, lon):
+    """Solar zenith angle (deg), NOAA approximation (~0.5 deg). times: UTC."""
+    t = pd.DatetimeIndex(times)
+    g = 2 * np.pi / 365 * (t.dayofyear - 1 + (t.hour + t.minute / 60 - 12) / 24)
+    decl = (0.006918 - 0.399912 * np.cos(g) + 0.070257 * np.sin(g) - 0.006758 * np.cos(2 * g)
+            + 0.000907 * np.sin(2 * g) - 0.002697 * np.cos(3 * g) + 0.00148 * np.sin(3 * g))
+    eqt = 229.18 * (0.000075 + 0.001868 * np.cos(g) - 0.032077 * np.sin(g) - 0.014615 * np.cos(2 * g)
+                    - 0.040849 * np.sin(2 * g))
+    ha = np.radians((t.hour * 60 + t.minute + eqt + 4 * lon) / 4 - 180)
+    la = np.radians(lat)
+    c = np.sin(la) * np.sin(decl) + np.cos(la) * np.cos(decl) * np.cos(ha)
+    return np.degrees(np.arccos(np.clip(np.asarray(c, float), -1, 1)))
+
+
+def hour_sza(ds, args):
+    """Solar zenith angle at the centre of each hour, or None if the site is unknown."""
+    ll = site_latlon(args.file, ds, getattr(args, "latlon", None))
+    if ll is None:
+        return None
+    return solar_zenith(pd.DatetimeIndex(ds["time"].values) + pd.Timedelta("30min"), *ll)
+
+
 def _base_mask(ds, args):
     """Hours passing the cloud-fraction, noise and LWP screens."""
     cf = ds["cloud_frac"].values
@@ -940,6 +985,12 @@ def _base_mask(ds, args):
                 notes.append(f"{label} <= {opt:.0f} m")
             else:
                 print(f"Note: no {var} in file; the {label} screen is ignored.")
+    if getattr(args, "max_sza", None) is not None:
+        z = hour_sza(ds, args)
+        if z is None:
+            sys.exit("--max-sza: unknown site coordinates; pass --latlon LAT LON.")
+        m &= z <= args.max_sza
+        notes.append(f"solar zenith <= {args.max_sza:g} deg")
     if args.coupled_only:
         if "decoupling_dz" in ds:
             m &= ds["decoupling_dz"].values <= args.dz_coupled
@@ -1017,6 +1068,11 @@ def cmd_quicklook(args):
         split = args.cb_split if args.cb_split is not None else np.nanmedian(cb)
         groups += [(f"cloud base <= {split:.0f} m", cb <= split),
                    (f"cloud base > {split:.0f} m", cb > split)]
+    z = hour_sza(ds, args)
+    if z is not None and "NDROP" in str(ds["CDNC"].attrs.get("long_name", "")):
+        z = z[m]
+        groups += [(f"solar zenith <= {args.sza_split:g} deg", z <= args.sza_split),
+                   (f"solar zenith > {args.sza_split:g} deg", z > args.sza_split)]
     if groups:
         print("\nRegime comparison (same screens; 95% day-block CIs):")
         print(f"  {'group':30s} hours  S(100nm) [CI]            D_Delta [CI]")
@@ -1071,9 +1127,10 @@ def cmd_quicklook(args):
     fig.suptitle(f"{site} {tsel.min():%b %Y} - {tsel.max():%b %Y}: {m.sum()} h on {n_days} days, "
                  f"cloud_frac >= {args.min_cloud_frac}{sub}", fontsize=10)
     fig.tight_layout()
-    png = os.path.splitext(args.file)[0] + "_quicklook.png"
+    stem = os.path.splitext(args.file)[0] + (f"_sza{args.max_sza:g}" if getattr(args, "max_sza", None) is not None else "")
+    png = stem + "_quicklook.png"
     fig.savefig(png, dpi=150)
-    tab.to_csv(os.path.splitext(args.file)[0] + "_quicklook.csv", index=False)
+    tab.to_csv(stem + "_quicklook.csv", index=False)
     print(f"\nSaved {png} and the CSV table next to it.")
 
 # ----------------------------------------------------------------------------
@@ -1153,6 +1210,13 @@ def main(argv=None):
                    help="coupling threshold on cloud base - LCL, m (default 150)")
     q.add_argument("--cb-split", type=float, default=None,
                    help="cloud-base height (m) splitting low/high bases (default: median)")
+    q.add_argument("--max-sza", type=float, default=None,
+                   help="keep hours with solar zenith angle <= this (deg), e.g. 60; for NDROP (MFRSR tau). "
+                        "Outputs get a _sza<value> suffix")
+    q.add_argument("--sza-split", type=float, default=60.0,
+                   help="solar zenith angle (deg) splitting high/low sun in the regime table (NDROP files)")
+    q.add_argument("--latlon", type=float, nargs=2, default=None, metavar=("LAT", "LON"),
+                   help="site coordinates for the solar zenith angle (default: from the file name or site)")
     q.add_argument("--n-boot", type=int, default=300,
                    help="day-block bootstrap resamples (default 300)")
     q.add_argument("--n-bins", type=int, default=None,
