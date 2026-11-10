@@ -35,6 +35,25 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from arm_ena_nd_pnsd import RADII_NM, cumulative_above, read_psd_hourly  # noqa: E402
 
 
+def _n_scale(N, status, units):
+    """Divisor that converts N_scaled to cm-3. Standard Cloudnet files are in m-3 (divide by 1e6); some legacy
+    files (e.g. MOSAiC/Polarstern, custom CloudnetPy 1.39) are already in cm-3 with units '1'. Decided from the
+    units, or for ambiguous units from the magnitude of plausible values (real Nd is >1e5 in m-3, <1e4 in cm-3)."""
+    u = str(units).replace(" ", "").lower()
+    if u in ("m-3", "m^-3", "1/m3", "m**-3"):
+        return 1e6
+    if u in ("cm-3", "cm^-3", "1/cm3", "cm**-3"):
+        return 1.0
+    v = N[(status == 1) & np.isfinite(N) & (N > 1.0)]
+    if v.size == 0:
+        return 1e6
+    _UNIT_NOTE["cm-3" if np.median(v) < 1e5 else "m-3"] += 1
+    return 1.0 if np.median(v) < 1e5 else 1e6
+
+
+_UNIT_NOTE = {"cm-3": 0, "m-3": 0}
+
+
 def read_der(der_dir, min_pixels, max_base, n_range, stat="mean"):
     files = sorted(glob.glob(os.path.join(der_dir, "*_der.nc")))
     if not files:
@@ -42,7 +61,8 @@ def read_der(der_dir, min_pixels, max_base, n_range, stat="mean"):
     rows, removed, dt_s = [], 0, None
     for f in files:
         with xr.open_dataset(f) as ds:
-            N = ds["N_scaled"].values.astype(float) / 1e6           # m-3 -> cm-3
+            N = ds["N_scaled"].values.astype(float)
+            N = N / _n_scale(N, ds["der_retrieval_status"].values, ds["N_scaled"].attrs.get("units", ""))
             st = ds["der_retrieval_status"].values
             h = ds["height"].values.astype(float)
             alt = float(np.nanmean(ds["altitude"].values))
@@ -74,6 +94,8 @@ def read_der(der_dir, min_pixels, max_base, n_range, stat="mean"):
         "cloud_top_height": g["top"].median(),
         "nd_iqr_ratio": g["N"].quantile(0.75) / g["N"].quantile(0.25),
     })
+    if _UNIT_NOTE["cm-3"]:
+        print(f"Cloudnet: N_scaled had no m-3 units; read as cm-3 in {_UNIT_NOTE['cm-3']} files, m-3 in {_UNIT_NOTE['m-3']}")
     print(f"Cloudnet: {len(files)} daily files, {len(prof)} valid profiles "
           f"({removed} removed outside {n_range[0]}-{n_range[1]} cm-3), "
           f"{len(hourly)} hours with any; >=0.5: {(hourly.cloud_frac >= 0.5).sum()}")
