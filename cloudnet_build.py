@@ -192,6 +192,7 @@ def main():
         if lwp is not None:
             ds["lwp_meas"] = ("time", lwp.reindex(hours).to_numpy(),
                               {"units": "kg m-2", "long_name": "hourly mean MWR LWP (Cloudnet)"})
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)) or ".", exist_ok=True)
     ds.to_netcdf(a.out, encoding={v: {"zlib": True, "complevel": 4} for v in ds.data_vars})
     cf = ds["cloud_frac"].values
     print(f"Wrote {a.out}: {len(hours)} matched hours (cloud_frac >= 0.5: {(cf >= 0.5).sum()}, "
