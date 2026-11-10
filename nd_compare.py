@@ -21,6 +21,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from arm_ena_nd_pnsd import ND_VAR, read_nd, hourly_nd  # noqa: E402
 from cloudnet_build import read_der  # noqa: E402
+from arm_ena_nd_pnsd import solar_zenith  # noqa: E402
 
 EXTRA = r"(^lwp|cloud_base|cloud_top|toterror)"
 
@@ -34,6 +35,8 @@ def main():
     p.add_argument("--min-cloud-frac", type=float, default=0.5, help="for both retrievals")
     p.add_argument("--max-base", type=float, default=2000.0)
     p.add_argument("--out", default=None, help="CSV of matched hours")
+    p.add_argument("--site-lat", type=float, default=None, help="with --site-lon: ratio vs solar zenith angle")
+    p.add_argument("--site-lon", type=float, default=None)
     a = p.parse_args()
 
     nd = hourly_nd(read_nd(a.ndrop_dir, ND_VAR, "strict", EXTRA), 0.0)
@@ -73,6 +76,24 @@ def main():
         if col in j:
             g = j.groupby(pd.cut(j[col], bins), observed=True)["ratio"].agg(["size", "median"])
             print("  by LWP (kg m-2):", {str(k): (int(v["size"]), round(v["median"], 2)) for k, v in g.iterrows()})
+    if a.site_lat is not None and a.site_lon is not None:
+        sza = solar_zenith(j.index + pd.Timedelta("30min"), a.site_lat, a.site_lon)
+        j["solar_zenith"] = sza
+        print("  by solar zenith angle (hour centre):")
+        for b0, b1 in ((0, 30), (30, 45), (45, 60), (60, 75), (75, 90)):
+            q = (sza > b0) & (sza <= b1)
+            if q.sum() >= 5:
+                print(f"    {b0:2d}-{b1:2d} deg: {q.sum():4d} h, median ratio {10 ** np.median(lr[q]):.2f} "
+                      f"(IQR {10 ** np.percentile(lr[q], 25):.2f}-{10 ** np.percentile(lr[q], 75):.2f})")
+        lw = np.log10(np.clip(j["lwp_meas"].to_numpy() * 1000, 1, None)) if "lwp_meas" in j else None
+
+        def fit(i, with_lwp=False):
+            cols = [np.ones(len(i)), sza[i]] + ([lw[i]] if with_lwp else [])
+            return np.linalg.lstsq(np.column_stack(cols), lr[i], rcond=None)[0][1]
+        for wl in ([False, True] if lw is not None else [False]):
+            b = [fit(np.concatenate([groups[k] for k in rng.integers(0, len(groups), len(groups))]), wl) for _ in range(500)]
+            print(f"  slope vs zenith{' (log LWP held fixed)' if wl else ''}: {fit(np.arange(len(lr)), wl):+.4f} dex per degree "
+                  f"[{np.percentile(b, 2.5):+.4f}, {np.percentile(b, 97.5):+.4f}]  (SGP: +0.008)")
     if a.out:
         j.to_csv(a.out)
         print(f"Wrote {a.out}")
