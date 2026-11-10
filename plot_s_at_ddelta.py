@@ -28,7 +28,7 @@ SOURCES = [
     (r"ao2018_cloudnet_clean", "AO2018 (Cloudnet)", "Arctic", "Cloudnet", "AO2018 fog (Cloudnet)"),
     (r"activate.*winter", "ACTIVATE winter", "Marine CAO", "Aircraft", "ACTIVATE winter"),
     (r"activate.*summer", "ACTIVATE summer", "Marine", "Aircraft", "ACTIVATE summer"),
-    (r"activate", "ACTIVATE (all)", "Marine", "Aircraft", None),
+    (r"activate", None, None, None, None),                      # all-season ACTIVATE: shown as winter + summer
     (r"ace-ena", "ACE-ENA", "Marine", "Aircraft", "ACE-ENA"),
     (r"acapex", "ACAPEX", "Marine", "Aircraft", "ACAPEX"),
     (r"acme", "ACME-V", "Arctic", "Aircraft", "ACME-V"),
@@ -66,6 +66,11 @@ SOURCES = [
 SKIP = [r"pilot_", r"_median", r"_orig", r"_sza\d", r"_2023_(smps|uhsas)", r"/ao2018_(fog|cvi_residual|cloudnet)_quicklook", r"pnsd_"]
 REG_COL = {"Marine": "#1f77b4", "Marine CAO": "#17becf", "Boreal": "#2ca02c", "Arctic": "#9467bd", "Continental": "#d62728"}
 MK = {"Ground NDROP": "o", "Ground in situ": "s", "Cloudnet": "^", "Aircraft": "D", "Ship in situ": "P"}
+LABEL_OFF = {"Puijo": (-6, 6), "GoAmazon": (6, 6), "LASIC (SMPS)": (-6, -12), "Zeppelin": (6, 4), "Melpitz": (-6, -12),
+             "AO2018 fog (FSSP)": (6, -2), "Norunda": (6, -10), "Pallas": (6, 4), "EPCAPE pier": (6, 6),
+             "ACTIVATE summer": (-6, 6), "Hyytiala": (6, -10), "Kenttarova": (-6, -12), "ACE-ENA": (6, -2),
+             "CACTI": (6, 4), "ACME-V": (6, -4), "SGP (Cloudnet)": (6, 4), "MOSAiC (Cloudnet)": (6, -10),
+             "EPCAPE Mt Soledad": (6, 6), "Bankhead": (6, -10), "HI-SCALE": (-6, 6)}
 QA = {"robust": 1.0, "moderate": 0.8, "slope only": 0.55, "Nd unverified": 0.55, "low": 0.3}
 
 
@@ -106,6 +111,8 @@ def main():
     ap.add_argument("--out", default="figures/synthesis/s_at_ddelta.png")
     a = ap.parse_args()
     q = pd.read_csv(a.synthesis).set_index("source")["quality"].to_dict() if os.path.exists(a.synthesis) else {}
+    if not q:
+        print(f"Warning: {a.synthesis} not found; all points drawn with the same transparency.")
     rows, seen = [], set()
     for csv in sorted(glob.glob("results/**/*_quicklook.csv", recursive=True)):
         p = csv.replace("\\", "/")
@@ -116,6 +123,8 @@ def main():
             print(f"  (no label for {p}; add it to SOURCES)")
             continue
         _, label, regime, method, sname = src
+        if label is None:
+            continue
         if label in seen:
             print(f"  (second file for {label}, skipped: {p})")
             continue
@@ -150,7 +159,8 @@ def main():
         al = QA.get(x.quality, 0.55)
         ax.errorbar(x.D_Delta, x.S_at_D, xerr=xe, yerr=ye, fmt=MK[x.method], color=REG_COL[x.regime], ms=8,
                     mec="k", mew=0.6, alpha=al, elinewidth=1, capsize=2)
-        ax.annotate(x.label, (x.D_Delta, x.S_at_D), xytext=(5, 4), textcoords="offset points", fontsize=7.5, alpha=max(al, 0.6))
+        ax.annotate(x.label, (x.D_Delta, x.S_at_D), xytext=LABEL_OFF.get(x.label, (5, 4)), textcoords="offset points",
+                    fontsize=7.5, alpha=max(al, 0.6), ha="right" if LABEL_OFF.get(x.label, (5, 4))[0] < 0 else "left")
     ax.axhline(0, color="0.6", lw=0.8); ax.axhline(1, color="0.6", lw=0.8, ls=":")
     ax.set(xscale="log", xlabel="closure diameter D$_\\Delta$ (nm)", ylabel="S(D$_\\Delta$) = dln N$_d$ / dln N(>D$_\\Delta$)",
            title="Susceptibility at the closure diameter vs the closure diameter (faded: not robust/moderate)")
