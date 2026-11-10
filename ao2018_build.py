@@ -19,8 +19,8 @@ Method
     --aerosol same-hour uses scans inside the fog hour (the DMPS samples whole air, so activated particles are
     included as dried residuals; the inlet's transmission of large fog droplets is not characterised).
     --aerosol clear uses fog-free scans within +/- --window-h hours instead (as for EPCAPE Mt. Soledad).
- 4. Ship exhaust: there is no mask in the DMPS file. Scans whose total number exceeds --spike-factor times the
-    running 6-h median are dropped (0 = off).
+ 4. Ship exhaust: scans whose total number exceeds --spike-factor times the running 6-h median are dropped
+    (0 = off); with --pollution-mask, only scans entirely within clean minutes of the AO2018 pollution mask are kept.
 """
 import argparse
 import glob
@@ -117,6 +117,68 @@ def read_dmps(path):
     return df.sort_index(), np.array(dnm)
 
 
+# ---- Ship-exhaust mask (Baccarini, Schmale & Dommen, doi:10.17043/ao2018-aerosol-pollution-mask): 1-min
+# "Pollution flag" for the 4th-deck inlet, 2018-08-01 to 2018-09-19. A scan is kept when all mask minutes in its
+# window are clean (--max-polluted-frac 0) and the mask covers it; scans outside the mask period are dropped.
+
+def read_pollution_mask(path):
+    m = pd.read_csv(path)
+    t = pd.to_datetime(m.iloc[:, 0], errors="coerce")
+    f = pd.to_numeric(m.iloc[:, 1], errors="coerce")
+    ok = t.notna().to_numpy()
+    return pd.Series(f.to_numpy()[ok], index=pd.DatetimeIndex(t[ok])).sort_index()
+
+
+def polluted_fraction(times, mask, clean_values, scan_min=9.0):
+    """Fraction of mask minutes in [t, t + scan_min) that are not clean; NaN where the mask has no data."""
+    times = pd.DatetimeIndex(times)
+    v = mask.to_numpy(float)
+    ok = np.isfinite(v)
+    pol = ok & ~np.isin(v, clean_values)
+    c = np.concatenate([[0], np.cumsum(pol)])
+    n = np.concatenate([[0], np.cumsum(ok)])
+    ti = mask.index.values
+    i0 = np.searchsorted(ti, times.values)
+    i1 = np.searchsorted(ti, (times + pd.Timedelta(minutes=scan_min)).values)
+    cov = n[i1] - n[i0]
+    return np.where(cov > 0, (c[i1] - c[i0]) / np.maximum(cov, 1), np.nan)
+
+
+def clean_flag_auto(mask, times, ntot, scan_min=9.0):
+    """Print the total particle number in scans that lie entirely within each flag value; the clean value is the
+    one with the lowest median (exhaust adds particles). Returns [value]."""
+    vals = sorted(pd.unique(mask.dropna()))
+    print(f"Pollution mask: {len(mask)} min, {mask.index.min():%Y-%m-%d %H:%M} to {mask.index.max():%Y-%m-%d %H:%M}")
+    print("  flag  share of minutes  scans entirely in flag  median N_tot (cm-3)")
+    best, best_n = None, np.inf
+    for v in vals:
+        inside = polluted_fraction(times, mask, [v], scan_min) == 0
+        med = float(np.nanmedian(np.asarray(ntot)[inside])) if inside.any() else np.nan
+        print(f"  {v:4g}  {np.mean(mask == v):16.1%}  {int(inside.sum()):22d}  {med:19.0f}")
+        if np.isfinite(med) and med < best_n:
+            best, best_n = v, med
+    print(f"  -> clean flag = {best:g} (lowest particle number; override with --clean-flag)")
+    return [float(best)]
+
+
+def apply_pollution_mask(times, ntot, path, clean="auto", max_frac=0.0, scan_min=9.0):
+    """Boolean keep-array for scans at `times` (ntot = total number per scan, used for the auto choice)."""
+    mask = read_pollution_mask(path)
+    vals = clean_flag_auto(mask, times, ntot, scan_min) if clean == "auto" else [float(x) for x in str(clean).split(",")]
+    fr = polluted_fraction(times, mask, vals, scan_min)
+    keep = np.isfinite(fr) & (fr <= max_frac)
+    print(f"Pollution mask (clean = {vals}, max polluted fraction {max_frac:g}): keeps {int(keep.sum())} of {len(keep)} "
+          f"scans; {int((~np.isfinite(fr)).sum())} outside the mask period, {int((np.isfinite(fr) & (fr > max_frac)).sum())} polluted")
+    return keep
+
+
+def add_mask_args(p):
+    p.add_argument("--pollution-mask", default=None, help="ao2018-aerosol-pollution-mask.csv (Bolin Centre); off if unset")
+    p.add_argument("--clean-flag", default="auto", help="flag value(s) meaning clean, e.g. 1 or 0,1 (default: auto)")
+    p.add_argument("--max-polluted-frac", type=float, default=0.0, help="largest polluted share of a scan's minutes")
+    p.add_argument("--scan-min", type=float, default=9.0, help="DMPS scan length (min) used to window the mask")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--fssp-dir", required=True)
@@ -134,6 +196,7 @@ def main():
     p.add_argument("--nd-stat", choices=["mean", "median"], default="mean",
                    help="how in-fog minutes are combined into hourly Nd (mean = in-cloud average as in the models; at ENA the hourly-mean NDROP matched the aircraft, the median was about 40 per cent low)")
     p.add_argument("--spike-factor", type=float, default=3.0, help="drop DMPS scans above this x 6-h median (0 = off)")
+    add_mask_args(p)
     a = p.parse_args()
 
     c = read_fssp(a.fssp_dir, a.nd_dmin, a.nd_dmax)
@@ -156,6 +219,8 @@ def main():
         spike = dm["Ntot"] > a.spike_factor * base
         print(f"DMPS: {len(dm)} scans, {dnm.min():.0f}-{dnm.max():.0f} nm; spike screen removes {spike.mean():.1%} (ship exhaust proxy)")
         dm = dm[~spike.fillna(False)]
+    if a.pollution_mask:
+        dm = dm[apply_pollution_mask(dm.index, dm["Ntot"], a.pollution_mask, a.clean_flag, a.max_polluted_frac, a.scan_min)]
     bins = dm.drop(columns="Ntot")
     fog_hours = set(hourly.index)
     cut = 2.0 * RADII_NM
@@ -198,7 +263,8 @@ def main():
                "settings": " ".join(f"{k}={v}" for k, v in vars(a).items() if k != "out"),
                "nd_source": "Leeds FSSP-100, doi:10.17043/oden-ao-2018-aerosol-fssp-1 (University of Leeds)",
                "psd_source": "SU DMPS, doi:10.17043/oden-ao-2018-aerosol-dmps-1",
-               "note": "Ship-level fog; no ship-exhaust mask in the DMPS file (spike screen only)."})
+               "note": ("Ship-level fog; DMPS scans screened with the AO2018 pollution mask (doi:10.17043/ao2018-aerosol-pollution-mask)"
+                        if a.pollution_mask else "Ship-level fog; spike screen only (no pollution mask)")})
     os.makedirs(os.path.dirname(os.path.abspath(a.out)) or ".", exist_ok=True)
     ds.to_netcdf(a.out)
     print(f"Wrote {a.out}. Run: python arm_ena_nd_pnsd.py quicklook {a.out} --min-cloud-frac 0.5")

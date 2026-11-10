@@ -22,6 +22,7 @@ import xarray as xr
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from arm_ena_nd_pnsd import RADII_NM, cumulative_above  # noqa: E402
+from ao2018_build import add_mask_args, apply_pollution_mask  # noqa: E402
 
 
 def main():
@@ -30,6 +31,7 @@ def main():
     p.add_argument("--out", default="results/ao2018/ao2018_cvi_residual.nc")
     p.add_argument("--max-dt", type=float, default=10.0, help="minutes between residual and whole-air scan")
     p.add_argument("--min-residual", type=float, default=0.5, help="cm-3; scans with fewer residuals are dropped")
+    add_mask_args(p)
     a = p.parse_args()
     d = xr.open_dataset(a.file).load()
     d.close()
@@ -40,10 +42,14 @@ def main():
     tr = pd.DatetimeIndex(d["time_DMPS"].values)
     tw = pd.DatetimeIndex(d["time_DMPS_whlr"].values)
     cut = 2.0 * RADII_NM
+    clean_w = np.ones(len(tw), bool)
+    if a.pollution_mask:                                     # mask the whole-air scans (the aerosol side of the pair)
+        ntot_w = cumulative_above(wh, dnm, np.array([dnm.min()]), None)[:, 0]
+        clean_w = apply_pollution_mask(tw, ntot_w, a.pollution_mask, a.clean_flag, a.max_polluted_frac, a.scan_min)
     rows, ccn, psd = [], [], []
     for i, t in enumerate(tr):
         j = int(np.argmin(np.abs((tw - t).total_seconds())))
-        if abs((tw[j] - t).total_seconds()) > a.max_dt * 60:
+        if abs((tw[j] - t).total_seconds()) > a.max_dt * 60 or not clean_w[j]:
             continue
         nres = float(cumulative_above(res[i][None], dnm, np.array([dnm.min()]), None)[0, 0])
         if not np.isfinite(nres) or nres < a.min_residual:
@@ -65,7 +71,7 @@ def main():
                 "diameter": ("radius", cut, {"units": "nm"}), "aerosol_diameter": ("aerosol_diameter", dnm, {"units": "nm"})},
         attrs={"site": "AO2018 Oden fog (GCVI residuals + whole-air DMPS)",
                "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-               "settings": f"max_dt={a.max_dt} min_residual={a.min_residual}",
+               "settings": f"max_dt={a.max_dt} min_residual={a.min_residual} pollution_mask={a.pollution_mask} clean_flag={a.clean_flag}",
                "source": "Karlsson & Zieger, doi:10.17043/oden-ao-2018-aerosol-cvi-1",
                "note": "Residual number carries a constant GCVI efficiency factor: S is independent of it, D_Delta is not."})
     os.makedirs(os.path.dirname(os.path.abspath(a.out)) or ".", exist_ok=True)

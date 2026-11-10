@@ -30,7 +30,7 @@ import xarray as xr
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from arm_ena_nd_pnsd import RADII_NM, cumulative_above  # noqa: E402
 from cloudnet_build import read_der  # noqa: E402
-from ao2018_build import read_dmps  # noqa: E402
+from ao2018_build import read_dmps, add_mask_args, apply_pollution_mask  # noqa: E402
 
 
 RAIN_NAMES = ("rain_detected", "rainfall_rate", "rain_rate")
@@ -135,6 +135,7 @@ def main():
     p.add_argument("--min-cloud-frac", type=float, default=0.1)
     p.add_argument("--min-scans", type=int, default=2)
     p.add_argument("--spike-factor", type=float, default=3.0)
+    add_mask_args(p)
     a = p.parse_args()
 
     make_der(a.categorize_dir, a.der_dir, a.force)
@@ -146,6 +147,8 @@ def main():
         spike = (dm["Ntot"] > a.spike_factor * base).fillna(False)
         print(f"DMPS: {len(dm)} scans; spike screen removes {spike.mean():.1%}")
         dm = dm[~spike]
+    if a.pollution_mask:
+        dm = dm[apply_pollution_mask(dm.index, dm["Ntot"], a.pollution_mask, a.clean_flag, a.max_polluted_frac, a.scan_min)]
     bins = dm.drop(columns="Ntot")
     cut = 2.0 * RADII_NM
     keep, psd = [], []
