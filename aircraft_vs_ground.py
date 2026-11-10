@@ -154,6 +154,34 @@ def main():
             if q.sum() >= 3:
                 print(f"    LWP {lo_:>3}-{hi_:<4} g m-2: {q.sum():3d} h, NDROP / aircraft {10 ** np.median(np.log10(nd_g[q] / nd_a[q])):.2f}")
 
+    # ---- 1b. solar zenith angle: in-situ Nd does not depend on the sun, so a trend of NDROP / aircraft with the
+    # zenith angle is an NDROP (MFRSR optical depth) effect; Cloudnet / NDROP rose 0.008 dex per degree at SGP.
+    sza = m.solar_zenith(tm + pd.Timedelta("30min"), a.site_lat, a.site_lon)
+    print("\n=== 1b. NDROP / aircraft vs solar zenith angle (hour centre):")
+    for lo_, hi_ in ((0, 45), (45, 60), (60, 75), (75, 90)):
+        q = ok & (sza > lo_) & (sza <= hi_)
+        if q.sum() >= 3:
+            r_ = np.log10(nd_g[q] / nd_a[q])
+            print(f"    zenith {lo_:2d}-{hi_:2d} deg: {q.sum():3d} h on {tm[q].normalize().nunique():2d} flights, "
+                  f"median ratio {10 ** np.median(r_):.2f} (IQR {10 ** np.percentile(r_, 25):.2f}-{10 ** np.percentile(r_, 75):.2f})")
+    ys, xs = np.log10(nd_g[ok] / nd_a[ok]), sza[ok]
+    if ok.sum() >= 10 and np.ptp(xs) > 10:
+        fit = lambda i: np.polyfit(xs[i], ys[i], 1)[0]
+        sl = fit(np.arange(len(ys)))
+        lo, hi = day_boot(tm[ok], fit, a.n_boot)
+        txt = f"    slope {sl:+.4f} dex per degree [{lo:+.4f}, {hi:+.4f}] (SGP Cloudnet / NDROP: +0.008)"
+        if "lwp_meas" in gnd:
+            lw = np.log10(np.clip(gnd["lwp_meas"].values[ig][ok] * 1000, 1, None))
+            def fit2(i):
+                X = np.column_stack([np.ones(len(i)), xs[i], lw[i]])
+                return np.linalg.lstsq(X, ys[i], rcond=None)[0][1]
+            lo2, hi2 = day_boot(tm[ok], fit2, a.n_boot)
+            txt += f"; with log LWP held fixed {fit2(np.arange(len(ys))):+.4f} [{lo2:+.4f}, {hi2:+.4f}]"
+        print(txt)
+        print(f"    r(zenith, log ratio) {np.corrcoef(xs, ys)[0, 1]:+.2f}; n = {ok.sum()} h, zenith {xs.min():.0f}-{xs.max():.0f} deg")
+    else:
+        print("    too few hours or too narrow a zenith range for a slope")
+
     # ---- 2. aerosol
     print("\n=== 2. Aerosol, ground / aircraft below-cloud N(>D):")
     for d in (70, 100, 150, 200):
@@ -180,13 +208,13 @@ def main():
 
     # ---- table and figure
     pairs = pd.DataFrame({"Nd_aircraft": nd_a, "Nd_ndrop": nd_g, "N100_aircraft": ca[:, i100],
-                          "N100_ground": cg[:, i100]}, index=tm)
+                          "N100_ground": cg[:, i100], "solar_zenith": sza}, index=tm)
     pairs.to_csv(os.path.join(out_dir, f"{a.label}_matched_hours.csv"))
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
-        fig, ax = plt.subplots(1, 3, figsize=(15, 4.6))
+        fig, ax = plt.subplots(1, 4, figsize=(20, 4.6))
         for k, (x, y, lab) in enumerate(((nd_a, nd_g, "Nd, cm$^{-3}$"), (ca[:, i100], cg[:, i100], "N(D > 100 nm), cm$^{-3}$"))):
             q = (x > 0) & (y > 0)
             ax[k].loglog(x[q], y[q], "o", ms=4, alpha=0.6, color="#3B6FB6")
@@ -202,6 +230,13 @@ def main():
         ax[2].set_xlabel("Cutoff diameter, nm"); ax[2].set_ylabel("mean log Nd − mean log N(>D), dex")
         ax[2].set_title("Closure offset by source", loc="left", fontsize=10)
         ax[2].legend(fontsize=7, frameon=False)
+        qq = ok
+        sc = ax[3].scatter(sza[qq], np.log10(nd_g[qq] / nd_a[qq]), c=nd_a[qq], s=18, cmap="viridis",
+                           norm=matplotlib.colors.LogNorm())
+        fig.colorbar(sc, ax=ax[3], label="aircraft Nd (cm$^{-3}$)")
+        ax[3].axhline(0, color="k", lw=0.8)
+        ax[3].set_xlabel("solar zenith angle, deg"); ax[3].set_ylabel("log$_{10}$(NDROP / aircraft)")
+        ax[3].set_title("Ratio vs sun angle", loc="left", fontsize=10)
         for x_ in ax:
             x_.grid(alpha=0.3)
         fig.suptitle(f"{a.label}: {len(common)} matched hours", x=0.01, ha="left")
