@@ -174,7 +174,9 @@ def apply_pollution_mask(times, ntot, path, clean="auto", max_frac=0.0, scan_min
 
 def add_mask_args(p):
     p.add_argument("--pollution-mask", default=None, help="ao2018-aerosol-pollution-mask.csv (Bolin Centre); off if unset")
-    p.add_argument("--clean-flag", default="auto", help="flag value(s) meaning clean, e.g. 1 or 0,1 (default: auto)")
+    p.add_argument("--clean-flag", default="1",
+                   help="flag value(s) meaning clean (default 1: 74%% of minutes, DMPS N_tot 62 vs 144 cm-3 for flag 2); "
+                        "'auto' picks the flag with the lowest particle number in the scans being masked")
     p.add_argument("--max-polluted-frac", type=float, default=0.0, help="largest polluted share of a scan's minutes")
     p.add_argument("--scan-min", type=float, default=9.0, help="DMPS scan length (min) used to window the mask")
 
