@@ -91,7 +91,10 @@ def _with_rain(cat, der_dir):
 def make_der(cat_dir, der_dir, force=False):
     from cloudnetpy.products import generate_der
     os.makedirs(der_dir, exist_ok=True)
-    cats = sorted(glob.glob(os.path.join(cat_dir, "**", "*.nc"), recursive=True))
+    # only categorize files: der_dir may sit inside cat_dir, and its der files must never be taken as input
+    cats = sorted(c for c in glob.glob(os.path.join(cat_dir, "**", "*.nc"), recursive=True)
+                  if "categorize" in os.path.basename(c).lower()
+                  and os.path.abspath(os.path.dirname(c)) != os.path.abspath(der_dir))
     made = skipped = failed = 0
     first_err = None
     for c in cats:
