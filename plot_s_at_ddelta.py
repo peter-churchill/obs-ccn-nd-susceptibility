@@ -10,7 +10,7 @@ For each quicklook table (written by `arm_ena_nd_pnsd.py quicklook`, columns D_n
     interpolated the same way (it does not include the uncertainty of D_Delta itself);
   * the D_Delta interval is read from the matching quicklook .txt where one exists.
 The tables are the ones on disk: re-run the quicklook with the synthesis settings first if they were overwritten.
-Quality (alpha) comes from docs/observational_synthesis.csv where the source can be matched.
+Quality (alpha) and the instrument used per source follow the synthesis (SOURCES below).
 Writes figures/synthesis/s_at_ddelta.png and results/s_at_ddelta.csv.
 """
 import argparse
@@ -21,49 +21,49 @@ import re
 import numpy as np
 import pandas as pd
 
-# path regex -> (label, regime, method, synthesis source); first match wins
+# file-name regex -> (label, regime, method, quality); first match wins. Quality as in the Synthesis sheet of
+# docs/observation_options.xlsx (docs/ is not in git). Instrument choices follow the synthesis rows.
 SOURCES = [
-    (r"ao2018_fog_clean", "AO2018 fog (FSSP)", "Arctic", "Ship in situ", "AO2018 fog (FSSP)"),
-    (r"ao2018_cvi_residual_clean", "AO2018 fog (residuals)", "Arctic", "Ship in situ", "AO2018 fog (residuals)"),
-    (r"ao2018_cloudnet_clean", "AO2018 (Cloudnet)", "Arctic", "Cloudnet", "AO2018 fog (Cloudnet)"),
-    (r"activate.*winter", "ACTIVATE winter", "Marine CAO", "Aircraft", "ACTIVATE winter"),
-    (r"activate.*summer", "ACTIVATE summer", "Marine", "Aircraft", "ACTIVATE summer"),
-    (r"activate", None, None, None, None),                      # all-season ACTIVATE: shown as winter + summer
-    (r"ace-ena", "ACE-ENA", "Marine", "Aircraft", "ACE-ENA"),
-    (r"acapex", "ACAPEX", "Marine", "Aircraft", "ACAPEX"),
-    (r"acme", "ACME-V", "Arctic", "Aircraft", "ACME-V"),
-    (r"hi-scale", "HI-SCALE", "Continental", "Aircraft", "HI-SCALE"),
-    (r"cacti", "CACTI", "Continental", "Aircraft", "CACTI"),
-    (r"goamazon", "GoAmazon", "Continental", "Aircraft", "GoAmazon"),
-    (r"sgp_cloudnet", "SGP (Cloudnet)", "Continental", "Cloudnet", "SGP (Cloudnet)"),
-    (r"ena_2014_2023_uhsas", "ENA (UHSAS)", "Marine", "Ground NDROP", "ENA (UHSAS)"),
-    (r"ena_2022_2026_smps", "ENA (SMPS 2022-26)", "Marine", "Ground NDROP", "ENA (SMPS 2022-26)"),
-    (r"sgp_2016_2025_smps", "SGP", "Continental", "Ground NDROP", "SGP"),
-    (r"lasic.*smps", "LASIC (SMPS)", "Marine", "Ground NDROP", "LASIC (SMPS)"),
-    (r"lasic.*uhsas", "LASIC (UHSAS)", "Marine", "Ground NDROP", "LASIC (UHSAS)"),
-    (r"epc_.*smps", "EPCAPE pier", "Marine", "Ground NDROP", "EPCAPE pier"),
-    (r"soledad", "EPCAPE Mt Soledad", "Marine", "Ground in situ", "EPCAPE Mt Soledad"),
-    (r"puijo", "Puijo", "Boreal", "Ground in situ", "Puijo"),
-    (r"pallas", "Pallas", "Boreal", "Ground in situ", "Pallas"),
-    (r"zeppelin", "Zeppelin", "Arctic", "Ground in situ", "Zeppelin"),
-    (r"hyytiala", "Hyytiala", "Boreal", "Cloudnet", "Hyytiala"),
-    (r"kenttarova", "Kenttarova", "Boreal", "Cloudnet", "Kenttarova"),
-    (r"norunda", "Norunda", "Boreal", "Cloudnet", "Norunda"),
-    (r"mace-head", "Mace Head", "Marine", "Cloudnet", "Mace Head"),
-    (r"maido", "Maido", "Marine", "Cloudnet", "Maido"),
-    (r"ny-alesund", "Ny-Alesund", "Arctic", "Cloudnet", "Ny-Alesund"),
-    (r"oliktok", "Oliktok", "Arctic", "Cloudnet", "Oliktok"),
-    (r"mosaic", "MOSAiC (Cloudnet)", "Arctic", "Cloudnet", "MOSAiC (Cloudnet)"),
-    (r"andoya", "Andoya (Cloudnet)", "Arctic", "Cloudnet", None),
-    (r"bankhead", "Bankhead", "Continental", "Cloudnet", "Bankhead"),
-    (r"cabauw", "Cabauw", "Continental", "Cloudnet", "Cabauw"),
-    (r"granada", "Granada", "Continental", "Cloudnet", "Granada"),
-    (r"palaiseau", "Palaiseau", "Continental", "Cloudnet", "Palaiseau"),
-    (r"schneeferner", "Schneefernerhaus", "Continental", "Cloudnet", "Schneefernerhaus"),
-    (r"bucharest", "Bucharest", "Continental", "Cloudnet", "Bucharest"),
-    (r"melpitz", "Melpitz", "Continental", "Cloudnet", "Melpitz"),
+    (r"/ao2018_fog_clean_", "AO2018 fog (FSSP)", "Arctic", "Ship in situ", "slope only"),
+    (r"/ao2018_cvi_residual_clean_", "AO2018 fog (residuals)", "Arctic", "Ship in situ", "slope only"),
+    (r"/ao2018_cloudnet_clean_", "AO2018 (Cloudnet)", "Arctic", "Cloudnet", "low"),
+    (r"/activate_winter_quicklook", "ACTIVATE winter", "Marine CAO", "Aircraft", "robust"),
+    (r"/activate_summer_quicklook", "ACTIVATE summer", "Marine", "Aircraft", "robust"),
+    (r"/ace-ena_aircraft_quicklook", "ACE-ENA", "Marine", "Aircraft", "robust"),
+    (r"/acapex_aircraft_uhsas_quicklook", "ACAPEX", "Marine", "Aircraft", "moderate"),
+    (r"/acme-v_aircraft_pcasp_quicklook", "ACME-V", "Arctic", "Aircraft", "moderate"),
+    (r"/hi-scale_aircraft_mergedaerosolsd_quicklook", "HI-SCALE", "Continental", "Aircraft", "robust"),
+    (r"/cacti_aircraft_mergedaerosolsd_quicklook", "CACTI", "Continental", "Aircraft", "robust"),
+    (r"/goamazon_aircraft_pcasp_quicklook", "GoAmazon", "Continental", "Aircraft", "moderate"),
+    (r"/sgp_cloudnet_quicklook", "SGP (Cloudnet)", "Continental", "Cloudnet", "Nd unverified"),
+    (r"/ena_2014_2023_uhsas_quicklook", "ENA (UHSAS)", "Marine", "Ground NDROP", "robust"),
+    (r"/ena_2022_2026_smps_quicklook", "ENA (SMPS 2022-26)", "Marine", "Ground NDROP", "moderate"),
+    (r"/sgp_2016_2025_smps_quicklook", "SGP", "Continental", "Ground NDROP", "moderate"),
+    (r"/lasic_2016_2017_smps_quicklook", "LASIC (SMPS)", "Marine", "Ground NDROP", "slope only"),
+    (r"/lasic_2016_2017_uhsas_quicklook", "LASIC (UHSAS)", "Marine", "Ground NDROP", "slope only"),
+    (r"/epc_2023_2024_smps_quicklook", "EPCAPE pier", "Marine", "Ground NDROP", "moderate"),
+    (r"/epcape_soledad_hourly_quicklook", "EPCAPE Mt Soledad", "Marine", "Ground in situ", "low"),
+    (r"/puijo", "Puijo", "Boreal", "Ground in situ", "robust"),
+    (r"/pallas", "Pallas", "Boreal", "Ground in situ", "robust"),
+    (r"/zeppelin", "Zeppelin", "Arctic", "Ground in situ", "robust"),
+    (r"/hyytiala_cloudnet", "Hyytiala", "Boreal", "Cloudnet", "Nd unverified"),
+    (r"/kenttarova_cloudnet", "Kenttarova", "Boreal", "Cloudnet", "Nd unverified"),
+    (r"/norunda_cloudnet", "Norunda", "Boreal", "Cloudnet", "Nd unverified"),
+    (r"/mace-head_cloudnet", "Mace Head", "Marine", "Cloudnet", "low"),
+    (r"/maido_cloudnet", "Maido", "Marine", "Cloudnet", "low"),
+    (r"/ny-alesund_cloudnet", "Ny-Alesund", "Arctic", "Cloudnet", "low"),
+    (r"/oliktok_cloudnet", "Oliktok", "Arctic", "Cloudnet", "low"),
+    (r"/mosaic_cloudnet_smps", "MOSAiC (Cloudnet, SMPS)", "Arctic", "Cloudnet", "low"),
+    (r"/andoya_cloudnet", "Andoya (Cloudnet)", "Arctic", "Cloudnet", "low"),
+    (r"/bankhead_cloudnet", "Bankhead", "Continental", "Cloudnet", "low"),
+    (r"/cabauw_cloudnet", "Cabauw", "Continental", "Cloudnet", "low"),
+    (r"/granada_cloudnet", "Granada", "Continental", "Cloudnet", "low"),
+    (r"/palaiseau_cloudnet", "Palaiseau", "Continental", "Cloudnet", "low"),
+    (r"/schneefernerhaus_cloudnet", "Schneefernerhaus", "Continental", "Cloudnet", "low"),
+    (r"/bucharest_cloudnet", "Bucharest", "Continental", "Cloudnet", "Nd unverified"),
+    (r"/melpitz_cloudnet", "Melpitz", "Continental", "Cloudnet", "Nd unverified"),
 ]
-SKIP = [r"pilot_", r"_median", r"_orig", r"_sza\d", r"_2023_(smps|uhsas)", r"/ao2018_(fog|cvi_residual|cloudnet)_quicklook", r"pnsd_"]
+SKIP = [r"pilot_", r"_median", r"_orig", r"_sza\d", r"/ena_2023_", r"pnsd_"]
 REG_COL = {"Marine": "#1f77b4", "Marine CAO": "#17becf", "Boreal": "#2ca02c", "Arctic": "#9467bd", "Continental": "#d62728"}
 MK = {"Ground NDROP": "o", "Ground in situ": "s", "Cloudnet": "^", "Aircraft": "D", "Ship in situ": "P"}
 LABEL_OFF = {"Puijo": (-6, 6), "GoAmazon": (6, 6), "LASIC (SMPS)": (-6, -12), "Zeppelin": (6, 4), "Melpitz": (-6, -12),
@@ -107,24 +107,18 @@ def txt_ci(csv, dd):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--exclude", nargs="*", default=[], help="extra path regexes to skip")
-    ap.add_argument("--synthesis", default="docs/observational_synthesis.csv")
     ap.add_argument("--out", default="figures/synthesis/s_at_ddelta.png")
     a = ap.parse_args()
-    q = pd.read_csv(a.synthesis).set_index("source")["quality"].to_dict() if os.path.exists(a.synthesis) else {}
-    if not q:
-        print(f"Warning: {a.synthesis} not found; all points drawn with the same transparency.")
-    rows, seen = [], set()
+    rows, seen, unmatched = [], set(), []
     for csv in sorted(glob.glob("results/**/*_quicklook.csv", recursive=True)):
         p = csv.replace("\\", "/")
         if any(re.search(s, p) for s in SKIP + a.exclude):
             continue
         src = next((s for s in SOURCES if re.search(s[0], p)), None)
         if src is None:
-            print(f"  (no label for {p}; add it to SOURCES)")
+            unmatched.append(p)
             continue
-        _, label, regime, method, sname = src
-        if label is None:
-            continue
+        _, label, regime, method, quality = src
         if label in seen:
             print(f"  (second file for {label}, skipped: {p})")
             continue
@@ -137,10 +131,16 @@ def main():
             continue
         seen.add(label)
         dlo, dhi = txt_ci(csv, dd)
-        rows.append(dict(label=label, regime=regime, method=method, quality=q.get(sname, "unknown"), file=p,
+        rows.append(dict(label=label, regime=regime, method=method, quality=quality, file=p,
                          D_Delta=dd, D_lo=dlo, D_hi=dhi, S_at_D=at(d, t.S.to_numpy(float), dd),
                          S_lo=at(d, t.S_lo.to_numpy(float), dd), S_hi=at(d, t.S_hi.to_numpy(float), dd),
                          S100=s100, n=int(t.n.max())))
+    if unmatched:
+        print(f"  not used (other instruments, variants or unlisted): {', '.join(os.path.basename(u) for u in unmatched)}")
+    nofile = [s[1] for s in SOURCES if not any(re.search(s[0], c.replace("\\", "/"))
+                                               for c in glob.glob("results/**/*_quicklook.csv", recursive=True))]
+    if nofile:
+        print(f"  no quicklook table found for: {', '.join(nofile)}")
     r = pd.DataFrame(rows).sort_values("D_Delta")
     os.makedirs("results", exist_ok=True)
     r.to_csv("results/s_at_ddelta.csv", index=False, float_format="%.3f")
