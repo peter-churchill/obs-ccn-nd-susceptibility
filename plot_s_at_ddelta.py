@@ -32,6 +32,7 @@ SOURCES = [
     (r"/activate_winter_quicklook", "ACTIVATE winter", "Marine CAO", "Aircraft", "robust"),
     (r"/activate_summer_quicklook", "ACTIVATE summer", "Marine", "Aircraft", "robust"),
     (r"/ace-ena_aircraft_quicklook", "ACE-ENA", "Marine", "Aircraft", "robust"),
+    (r"/naames_aircraft_quicklook", "NAAMES", "Marine", "Aircraft", "moderate"),
     (r"/acapex_aircraft_uhsas_quicklook", "ACAPEX", "Marine", "Aircraft", "moderate"),
     (r"/acme-v_aircraft_pcasp_quicklook", "ACME-V", "Arctic", "Aircraft", "moderate"),
     (r"/hi-scale_aircraft_mergedaerosolsd_quicklook", "HI-SCALE", "Continental", "Aircraft", "robust"),
