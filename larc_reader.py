@@ -1,5 +1,5 @@
 """Readers for NASA LaRC airborne campaigns whose ICARTT files follow the ACTIVATE layout (LARGE group):
-NAAMES (C-130, 2015-18) now; CAMP2Ex to follow. Same return objects as activate_reader, so aircraft_build's
+NAAMES (C-130, 2015-17) and CAMP2Ex (P-3B, 2019). Same return objects as activate_reader, so aircraft_build's
 pass detection and pairing run unchanged.
 
 Folder layout (from nasa_aircraft_get.sh), e.g. NAAMES:
@@ -29,11 +29,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from icartt import read_ict, read_header  # noqa: E402
 from activate_reader import latest  # noqa: E402
 
+ICT = "*.[iI][cC][tT]"     # some files end in .ICT
 CAMPAIGNS = {
-    "naames": dict(platform="C130", cdp="NAAMES-LARGE-CDP_C130_*.ict", cloudflag="NAAMES-LARGE-CLOUDFLAG_C130_*.ict",
-                   smps="NAAMES-LARGE-SMPS_C130_*.ict", las="NAAMES-LARGE-LAS_C130_*.ict",
-                   nav="NAAMES-HSKPING_C130_*.ict", nd_col="DropletNum", vol_col="vCDP",
-                   smps_total="nSMPS", las_total=r"IntegN_\d+to\d+nm.*LAS"),
+    # nd_scale converts the droplet number to cm-3; LWC from lwc_col (g m-3) or from vol_col (um3 cm-3)
+    "naames": dict(cdp="NAAMES-LARGE-CDP_C130_" + ICT, nd_col="DropletNum", nd_scale=1.0, vol_col="vCDP",
+                   cloudflag="NAAMES-LARGE-CLOUDFLAG_C130_" + ICT, cloudflag_col="CloudFlag",
+                   smps="NAAMES-LARGE-SMPS_C130_" + ICT, smps_end="End_UTC", las="NAAMES-LARGE-LAS_C130_" + ICT,
+                   smps_total="nSMPS", las_total=r"IntegN_\d+to\d+nm.*LAS", inlet=None,
+                   nav="NAAMES-HSKPING_C130_" + ICT, nav_dir="NAAMES_MetNav_AircraftInSitu_Data", probe="CDP 2-50 um"),
+    "camp2ex": dict(cdp="CAMP2Ex-FCDP_P3B_" + ICT, nd_col="conc", nd_scale=1e-3, lwc_col="twc",
+                    cloudflag="CAMP2EX-CLOUDFLAG_P3B_" + ICT, cloudflag_col="Cloud",
+                    smps="CAMP2EX-LARGE-SMPS_P3B_" + ICT, smps_end="Time_Stop", las="CAMP2EX-LARGE-LAS_P3B_" + ICT,
+                    smps_total="nSMPS", las_total="nLAS",
+                    inlet="CAMP2EX-LARGE-INLETFLAG_P3B_" + ICT, inlet_col="InletFlag_LARGE",
+                    nav="CAMP2EX-METNAV_P3B_" + ICT, nav_dir="CAMP2Ex_MetNav_AircraftInSitu_P3_Data", probe="FCDP 1-50 um"),
 }
 
 
@@ -134,14 +143,13 @@ def read_cloud_larc(campaign, cloud_dir, dmin, dmax, nav_dir):
             no_nav.append(fl)
             continue
         d = read_ict(f)
-        c = pd.DataFrame({"Nd": d[cfg["nd_col"]].to_numpy(float),
-                          "LWC": d[cfg["vol_col"]].to_numpy(float) * 1e-6}, index=d.index)
+        lwc = d[cfg["lwc_col"]].to_numpy(float) if cfg.get("lwc_col") else d[cfg["vol_col"]].to_numpy(float) * 1e-6
+        c = pd.DataFrame({"Nd": d[cfg["nd_col"]].to_numpy(float) * cfg["nd_scale"], "LWC": lwc}, index=d.index)
         c = c[~c.index.duplicated()].join(nav, how="inner")
         parts.append(c)
     if no_nav:
         print(f"  CDP: {len(no_nav)} flights skipped without housekeeping position ({', '.join(no_nav[:5])})")
-    if dmin > 2.0 or dmax < 50.0:
-        print(f"  note: {cfg['nd_col']} covers the full CDP range 2-50 um; --nd-dmin/--nd-dmax are not applied")
+    print(f"  droplets: {cfg['probe']} total ({cfg['nd_col']}); --nd-dmin/--nd-dmax are not applied")
     c = pd.concat(parts).sort_index()
     return c[~c.index.duplicated()]
 
@@ -150,11 +158,12 @@ def read_aerosol_larc(campaign, aerosol_dir, nav_dir, cloud_dir=None, cloud=None
     cfg = CAMPAIGNS[campaign]
     las, smps = latest(aerosol_dir, cfg["las"]), latest(aerosol_dir, cfg["smps"])
     cflag = latest(cloud_dir, cfg["cloudflag"]) if cloud_dir else {}
+    inlet = latest(aerosol_dir, cfg["inlet"]) if cfg.get("inlet") else {}
     if not las:
         sys.exit(f"No {cfg['las']} files in {aerosol_dir}")
     grid = None
     frames, meta = [], []
-    st = dict(flights=0, no_nav=0, no_smps=0, no_flag=0, flagged=[])
+    st = dict(flights=0, no_nav=0, no_smps=0, no_flag=0, flagged=[], no_inlet=0, cvi=[])
     notes = set()
     for fl, f in las.items():
         nav = _nav(nav_dir, cfg["nav"], fl)
@@ -184,7 +193,7 @@ def read_aerosol_larc(campaign, aerosol_dir, nav_dir, cloud_dir=None, cloud=None
                 s = s / S["stdPT"].to_numpy(float)[:, None]
             base = pd.Timestamp(S.attrs["date"])
             t0 = base + pd.to_timedelta(S[S.attrs["indep"]].to_numpy(float), unit="s")
-            t1 = base + pd.to_timedelta(S["End_UTC"].to_numpy(float), unit="s")
+            t1 = base + pd.to_timedelta(S[cfg["smps_end"]].to_numpy(float), unit="s")
             j = np.searchsorted(t0.values, idx.values, side="right") - 1
             ok = j >= 0
             ok[ok] &= idx.values[ok] <= t1.values[j[ok]]
@@ -204,12 +213,20 @@ def read_aerosol_larc(campaign, aerosol_dir, nav_dir, cloud_dir=None, cloud=None
             a[:, :n_s] = sv[:, s_keep]
         ok = np.ones(len(idx), bool)
         if fl in cflag:
-            cf = read_ict(cflag[fl])["CloudFlag"]
+            cf = read_ict(cflag[fl])[cfg["cloudflag_col"]]
             cf = cf[~cf.index.duplicated()].reindex(idx.floor("s"))
             st["flagged"].append(float((cf == 1).mean()))
             ok &= ~(cf == 1).to_numpy()
         else:
             st["no_flag"] += 1
+        if cfg.get("inlet"):
+            if fl in inlet:
+                fi = read_ict(inlet[fl])[cfg["inlet_col"]]
+                fi = fi[~fi.index.duplicated()].reindex(idx.floor("s"))
+                st["cvi"].append(float((fi == 1).mean()))
+                ok &= (fi == 0).to_numpy()
+            else:
+                st["no_inlet"] += 1
         m = nav.reindex(idx.floor("s"))
         ok = ok & m["alt"].notna().to_numpy()
         frames.append(pd.DataFrame(a[ok], index=idx[ok]))
@@ -222,7 +239,9 @@ def read_aerosol_larc(campaign, aerosol_dir, nav_dir, cloud_dir=None, cloud=None
     print(f"Aerosol: {campaign.upper()} SMPS ({grid[0]:.1f}-{grid[n_s - 1]:.0f} nm) + LAS ({grid[n_s]:.0f}-{grid[-1]:.0f} nm), "
           f"{'STP' if stp else 'ambient (divided by stdPT)'}; {st['flights']} flights, {st['no_nav']} without position, "
           f"{st['no_smps']} without SMPS, {st['no_flag']} without cloud flag; cloud flag removes "
-          f"{np.mean(st['flagged']) if st['flagged'] else 0:.0%} of seconds")
+          f"{np.mean(st['flagged']) if st['flagged'] else 0:.0%} of seconds"
+          + (f"; CVI inlet removes {np.mean(st['cvi']) if st['cvi'] else 0:.0%}, {st['no_inlet']} flights without inlet flag"
+             if cfg.get("inlet") else ""))
     for n in sorted(notes):
         print("  " + n)
     if cloud is not None:
