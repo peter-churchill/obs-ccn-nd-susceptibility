@@ -79,18 +79,27 @@ def read_cloud_oracles(cloud_dir, dmin, dmax, nav_dir):
     files = latest(cloud_dir, "ORACLES-UND-SUMMARY_P3_*.ict")
     if not files:
         sys.exit(f"No ORACLES-UND-SUMMARY files in {cloud_dir}")
-    parts, no_nav = [], []
+    parts, no_nav, no_cdp = [], [], []
     for fl, f in files.items():
         nav = _nav(nav_dir, fl)
         if nav is None:
             no_nav.append(fl)
             continue
-        d = read_ict(f, usecols=["CDP_Conc", "CDP_LWC"])
-        c = pd.DataFrame({"Nd": d["CDP_Conc"].to_numpy(float), "LWC": d["CDP_LWC"].to_numpy(float)}, index=d.index)
+        d = read_ict(f)
+        cn = next((x for x in d.columns if re.fullmatch(r"CDP_?Conc\w*", x, re.I)), None)
+        cl = next((x for x in d.columns if re.fullmatch(r"CDP_?LWC\w*", x, re.I)), None)
+        if cn is None or cl is None or d[cn].notna().sum() == 0:
+            no_cdp.append(fl)
+            continue
+        c = pd.DataFrame({"Nd": d[cn].to_numpy(float), "LWC": d[cl].to_numpy(float)}, index=d.index)
         c = c[~c.index.duplicated()].join(nav[["alt", "lat", "lon"]], how="inner")
         parts.append(c)
     if no_nav:
         print(f"  CDP: {len(no_nav)} flights skipped without housekeeping ({', '.join(no_nav[:5])})")
+    if no_cdp:
+        print(f"  CDP: {len(no_cdp)} summary files without CDP number ({', '.join(no_cdp[:8])}{' ...' if len(no_cdp) > 8 else ''})")
+    if not parts:
+        sys.exit("No flight with CDP number and housekeeping.")
     print("  droplets: CDP (UND summary, CDP_Conc, about 2-50 um); --nd-dmin/--nd-dmax are not applied")
     c = pd.concat(parts).sort_index()
     return c[~c.index.duplicated()]
