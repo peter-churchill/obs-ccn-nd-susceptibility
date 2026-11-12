@@ -231,7 +231,7 @@ def main():
                          "concentration when present, else the long name")
     ap.add_argument("--clear-nd", type=float, default=1.0,
                     help="cm-3; drop aerosol seconds within 2 s of droplets above this (0 = off)")
-    ap.add_argument("--format", choices=["arm", "activate", "naames", "camp2ex"], default="arm",
+    ap.add_argument("--format", choices=["arm", "activate", "naames", "camp2ex", "oracles"], default="arm",
                     help="arm: ARM netCDF (default); activate: NASA ACTIVATE ICARTT files "
                          "(FCDP in --cloud-dir, LAS/SMPS/InletFlag in --aerosol-dir, 1-s merges in --merge-dir); "
                          "naames / camp2ex: NASA LaRC LARGE files (CDP + CloudFlag in --cloud-dir, SMPS/LAS in --aerosol-dir, "
@@ -256,6 +256,12 @@ def main():
         c = read_cloud_larc(a.format, a.cloud_dir, a.nd_dmin, a.nd_dmax, mdir)
         aer, am, dnm = read_aerosol_larc(a.format, a.aerosol_dir, mdir, cloud_dir=a.cloud_dir,
                                          cloud=c if a.clear_nd > 0 else None, clear_nd=a.clear_nd, stp=a.activate_stp)
+    elif a.format == "oracles":
+        from oracles_reader import read_cloud_oracles, read_aerosol_oracles
+        mdir = a.merge_dir or os.path.join(os.path.dirname(os.path.normpath(a.cloud_dir)), "ORACLES_MetNav_AircraftInSitu_Data")
+        c = read_cloud_oracles(a.cloud_dir, a.nd_dmin, a.nd_dmax, mdir)
+        aer, am, dnm = read_aerosol_oracles(a.aerosol_dir, mdir, cloud=c if a.clear_nd > 0 else None,
+                                            clear_nd=a.clear_nd, stp=a.activate_stp)
     else:
         c = read_cloud(a.cloud_dir, a.nd_dmin, a.nd_dmax)
         aer, am, dnm = read_aerosol(a.aerosol_dir, cloud=c if a.clear_nd > 0 else None, clear_nd=a.clear_nd,
