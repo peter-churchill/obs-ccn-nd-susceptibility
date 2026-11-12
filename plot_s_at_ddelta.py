@@ -37,7 +37,7 @@ SOURCES = [
     (r"/hi-scale_aircraft_mergedaerosolsd_quicklook", "HI-SCALE", "Continental", "Aircraft", "robust"),
     (r"/cacti_aircraft_mergedaerosolsd_quicklook", "CACTI", "Continental", "Aircraft", "robust"),
     (r"/goamazon_aircraft_pcasp_quicklook", "GoAmazon", "Continental", "Aircraft", "moderate"),
-    (r"/ena_cloudnet_smps_quicklook", "ENA (Cloudnet, SMPS)", "Marine", "Cloudnet", "moderate"),
+    (r"/ena_cloudnet_smps_quicklook", "ENA (Cloudnet, SMPS)", "Marine", "Cloudnet", "low"),       # one half-year (2026)
     (r"/sgp_cloudnet_quicklook", "SGP (Cloudnet)", "Continental", "Cloudnet", "moderate"),
     (r"/ena_2014_2023_uhsas_relerr_quicklook", "ENA (UHSAS)", "Marine", "Ground NDROP", "parked"),
     (r"/ena_2022_2026_smps_relerr_quicklook", "ENA (SMPS 2022-26)", "Marine", "Ground NDROP", "moderate"),
@@ -58,8 +58,8 @@ SOURCES = [
     (r"/oliktok_cloudnet", "Oliktok", "Arctic", "Cloudnet", "low"),
     (r"/mosaic_cloudnet_smps", "MOSAiC (Cloudnet, SMPS)", "Arctic", "Cloudnet", "low"),
     (r"/andoya_cloudnet", "Andoya (Cloudnet)", "Arctic", "Cloudnet", "low"),
-    (r"/bankhead_cloudnet_smps_quicklook", "Bankhead", "Continental", "Cloudnet", "moderate"),
-    (r"/lasic_cloudnet_smps_quicklook", "LASIC (Cloudnet, SMPS)", "Marine", "Cloudnet", "moderate"),
+    (r"/bankhead_cloudnet_smps_quicklook", "Bankhead", "Continental", "Cloudnet", "low"),           # 98 h
+    (r"/lasic_cloudnet_smps_quicklook", "LASIC (Cloudnet, SMPS)", "Marine", "Cloudnet", "low"),   # 8 h with cloud_frac >= 0.5
     (r"/cabauw_cloudnet", "Cabauw", "Continental", "Cloudnet", "moderate"),
     (r"/granada_cloudnet", "Granada", "Continental", "Cloudnet", "moderate"),
     (r"/palaiseau_cloudnet", "Palaiseau", "Continental", "Cloudnet", "low"),
