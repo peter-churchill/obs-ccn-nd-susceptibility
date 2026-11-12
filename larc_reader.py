@@ -86,7 +86,11 @@ def _as_dndlogd(v, d_nm, total, name):
 
 
 def _cols(df, pat):
-    return [c for c in df.columns if re.fullmatch(pat, c)]
+    """Bin columns, e.g. LAS_Bin01 (also LAS_Bin_01, las_bin01_...); exits with the column list if none match."""
+    cols = [c for c in df.columns if re.match(pat, c, re.I)]
+    if not cols:
+        sys.exit(f"No columns matching {pat} in {df.attrs.get('file')}. Columns: {list(df.columns)[:40]}")
+    return cols
 
 
 def _nav(nav_dir, pattern, flight, cache={}):
@@ -145,7 +149,7 @@ def read_aerosol_larc(campaign, aerosol_dir, nav_dir, cloud_dir=None, cloud=None
             st["no_nav"] += 1
             continue
         L = read_ict(f)
-        lcols = _cols(L, r"LAS_Bin\d+")
+        lcols = _cols(L, r"LAS_?Bin_?\d+")
         _, h = read_header(f)
         dl, how_l = _bin_diameters(h, len(lcols), 30, 20000)
         tot = next((L[c].to_numpy(float) for c in L.columns if re.fullmatch(cfg["las_total"], c)), None)
@@ -159,7 +163,7 @@ def read_aerosol_larc(campaign, aerosol_dir, nav_dir, cloud_dir=None, cloud=None
         sv, ds = None, None
         if fl in smps:
             S = read_ict(smps[fl])
-            scols = _cols(S, r"SMPS_Bin\d+")
+            scols = _cols(S, r"SMPS_?Bin_?\d+")
             _, hs = read_header(smps[fl])
             ds, how_s = _bin_diameters(hs, len(scols), 2, 1500)
             s, conv = _as_dndlogd(S[scols].to_numpy(float), ds, S[cfg["smps_total"]].to_numpy(float)
