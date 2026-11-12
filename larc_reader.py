@@ -85,6 +85,19 @@ def _as_dndlogd(v, d_nm, total, name):
     return v, f"dN/dlogD (integral/total {r_dlog:.2f})"
 
 
+def _bins(df, inst, header, lo_nm, hi_nm):
+    """Size-bin columns of instrument inst (LAS/SMPS) and their mid-diameters (nm). Two naming schemes occur:
+    LAS_Bin01.. with the diameters in a header comment (2016-17 files), or dNdlogDp_PSL_100nm_LAS.. with the
+    diameter in the name (2015 files)."""
+    named = [(c, float(m.group(1))) for c in df.columns
+             for m in [re.search(r"(\d+\.?\d*)\s*nm", c)] if m and inst.lower() in c.lower() and "dndlog" in c.lower()]
+    if len(named) >= 5:
+        return [c for c, _ in named], np.array([d for _, d in named]), "diameters in the column names"
+    cols = _cols(df, rf"{inst}_?Bin_?\d+")
+    d, how = _bin_diameters(header, len(cols), lo_nm, hi_nm)
+    return cols, d, how
+
+
 def _cols(df, pat):
     """Bin columns, e.g. LAS_Bin01 (also LAS_Bin_01, las_bin01_...); exits with the column list if none match."""
     cols = [c for c in df.columns if re.match(pat, c, re.I)]
@@ -149,9 +162,8 @@ def read_aerosol_larc(campaign, aerosol_dir, nav_dir, cloud_dir=None, cloud=None
             st["no_nav"] += 1
             continue
         L = read_ict(f)
-        lcols = _cols(L, r"LAS_?Bin_?\d+")
         _, h = read_header(f)
-        dl, how_l = _bin_diameters(h, len(lcols), 30, 20000)
+        lcols, dl, how_l = _bins(L, "LAS", h, 30, 20000)
         tot = next((L[c].to_numpy(float) for c in L.columns if re.fullmatch(cfg["las_total"], c)), None)
         lv, conv = _as_dndlogd(L[lcols].to_numpy(float), dl, tot, "LAS")
         notes.add(f"LAS: {conv}; diameters from '{how_l}'")
@@ -163,9 +175,8 @@ def read_aerosol_larc(campaign, aerosol_dir, nav_dir, cloud_dir=None, cloud=None
         sv, ds = None, None
         if fl in smps:
             S = read_ict(smps[fl])
-            scols = _cols(S, r"SMPS_?Bin_?\d+")
             _, hs = read_header(smps[fl])
-            ds, how_s = _bin_diameters(hs, len(scols), 2, 1500)
+            scols, ds, how_s = _bins(S, "SMPS", hs, 2, 1500)
             s, conv = _as_dndlogd(S[scols].to_numpy(float), ds, S[cfg["smps_total"]].to_numpy(float)
                                   if cfg["smps_total"] in S else None, "SMPS")
             notes.add(f"SMPS: {conv}; diameters from '{how_s}'")
