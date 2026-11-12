@@ -231,9 +231,11 @@ def main():
                          "concentration when present, else the long name")
     ap.add_argument("--clear-nd", type=float, default=1.0,
                     help="cm-3; drop aerosol seconds within 2 s of droplets above this (0 = off)")
-    ap.add_argument("--format", choices=["arm", "activate"], default="arm",
+    ap.add_argument("--format", choices=["arm", "activate", "naames"], default="arm",
                     help="arm: ARM netCDF (default); activate: NASA ACTIVATE ICARTT files "
-                         "(FCDP in --cloud-dir, LAS/SMPS/InletFlag in --aerosol-dir, 1-s merges in --merge-dir)")
+                         "(FCDP in --cloud-dir, LAS/SMPS/InletFlag in --aerosol-dir, 1-s merges in --merge-dir); "
+                         "naames: NASA NAAMES LARGE files (CDP + CloudFlag in --cloud-dir, SMPS/LAS in --aerosol-dir, "
+                         "HSKPING in --merge-dir), see larc_reader.py")
     ap.add_argument("--merge-dir", default=None,
                     help="ACTIVATE 1-s merge folder for position (default: <cloud-dir>/../merge)")
     ap.add_argument("--nd-stat", choices=["mean", "median"], default="mean",
@@ -248,6 +250,12 @@ def main():
         c = read_cloud_activate(a.cloud_dir, a.nd_dmin, a.nd_dmax, mdir)
         aer, am, dnm = read_aerosol_activate(a.aerosol_dir, mdir, cloud=c if a.clear_nd > 0 else None,
                                              clear_nd=a.clear_nd, stp=a.activate_stp)
+    elif a.format == "naames":
+        from larc_reader import read_cloud_larc, read_aerosol_larc
+        mdir = a.merge_dir or os.path.join(os.path.dirname(os.path.normpath(a.cloud_dir)), "NAAMES_MetNav_AircraftInSitu_Data")
+        c = read_cloud_larc("naames", a.cloud_dir, a.nd_dmin, a.nd_dmax, mdir)
+        aer, am, dnm = read_aerosol_larc("naames", a.aerosol_dir, mdir, cloud_dir=a.cloud_dir,
+                                         cloud=c if a.clear_nd > 0 else None, clear_nd=a.clear_nd, stp=a.activate_stp)
     else:
         c = read_cloud(a.cloud_dir, a.nd_dmin, a.nd_dmax)
         aer, am, dnm = read_aerosol(a.aerosol_dir, cloud=c if a.clear_nd > 0 else None, clear_nd=a.clear_nd,
