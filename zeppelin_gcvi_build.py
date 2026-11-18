@@ -8,7 +8,7 @@ Dataset layout:
   part1 (one DMPS, 30 bins, ~5-7 min scans): switches inlet. cloud_flag == "yes": DMPS behind the GCVI -> cloud RESIDUAL
         size distribution (already divided by the enrichment factor and multiplied by the transmission factor); "no":
         whole-air inlet. Also the FM-120 fog-monitor droplet spectrum (43 bins, ~2-50 um), updraft, T, wind, visibility.
-  part2 (two DMPS on the whole-air inlet, 57 bins with duplicated "pairs" after a settings change, 5-809 nm): total aerosol
+  part2 (two DMPS on the whole-air inlet, 57 bins with duplicated "pairs" after a settings change, 5-809 nm; regridded per scan): total aerosol
         (interstitial + evaporated droplets), used for N(>D) in cloud.
 
 Writes two files with the standard layout (CDNC, CCN(radius) with coord diameter, cloud_frac), so
@@ -35,18 +35,22 @@ from arm_ena_nd_pnsd import RADII_NM, cumulative_above  # noqa: E402
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 
-def merge_pairs(d_nm, psd, tol=0.05):
-    """Merge bins whose diameters differ by < tol (the part2 'pairs': only one of each has data in a given scan)."""
+def regrid(d_nm, psd, grid):
+    """Per scan, interpolate dN/dlogD (linear in value, in log D) from the bins that have data onto a fixed grid,
+    within that scan's measured range. Handles the part2 bin 'pairs' and the two DMPS with different grids."""
     ok = np.isfinite(d_nm)
-    d_nm, psd = d_nm[ok], psd[:, ok]
-    o = np.argsort(d_nm)
-    d, p = d_nm[o], psd[:, o]
-    groups = [[0]]
-    for i in range(1, len(d)):
-        (groups[-1].append(i) if d[i] / d[groups[-1][0]] - 1 < tol else groups.append([i]))
-    dc = np.array([np.exp(np.log(d[g]).mean()) for g in groups])
-    pc = np.column_stack([np.nanmean(p[:, g], axis=1) for g in groups])
-    return dc, pc
+    d, p = d_nm[ok], psd[:, ok]
+    o = np.argsort(d)
+    ld, p, lg = np.log(d[o]), p[:, o], np.log(grid)
+    out = np.full((p.shape[0], len(grid)), np.nan)
+    for t in range(p.shape[0]):
+        v = np.isfinite(p[t]) & (p[t] >= 0)
+        if v.sum() < 3:
+            continue
+        x, y = ld[v], p[t][v]
+        inside = (lg >= x[0]) & (lg <= x[-1])
+        out[t, inside] = np.interp(lg[inside], x, y)
+    return out
 
 
 def log_widths(d):
@@ -102,6 +106,7 @@ def main():
     dr_nm = p1.aerosol_diameters.values * 1e9
     o1 = np.argsort(dr_nm)
     dr_nm, res = dr_nm[o1], p1.aerosol_particle_size_distribution.values[:, o1]
+    nd_res_dmps = np.where(np.isfinite(res).any(axis=1), np.nansum(np.where(res > 0, res, 0) * log_widths(dr_nm), axis=1), np.nan)
     met = {k: p1[v].values.astype(float) for k, v in [("updraft", "updraft_velocity"), ("temperature", "temperature"),
                                                      ("wind_speed", "wind_speed"), ("visibility", "visibility_mean"),
                                                      ("enrichment_factor", "enrichment_factor")]}
@@ -109,13 +114,13 @@ def main():
           f"residual DMPS {dr_nm.min():.0f}-{dr_nm.max():.0f} nm")
 
     s1 = pd.DataFrame({"cloud": cloud.astype(float)}, index=t1)
-    sc = pd.DataFrame({"Nd_fm120": nd_fm, "Nd_residual": nd_res, **met}, index=t1)[cloud]
+    sc = pd.DataFrame({"Nd_fm120": nd_fm, "Nd_residual": nd_res, "Nd_residual_dmps": nd_res_dmps, **met}, index=t1)[cloud]
     rs = pd.DataFrame(res, index=t1)[cloud]
 
     # ---- part2: whole-air size distribution, in-cloud scans only
     t2 = pd.DatetimeIndex(p2.time.values)
-    d2, w2 = merge_pairs(p2.aerosol_diameters.values * 1e9, p2.aerosol_particle_size_distribution.values)
-    w2[w2 < 0] = np.nan
+    d2 = np.geomspace(5.0, 810.0, 64)
+    w2 = regrid(p2.aerosol_diameters.values * 1e9, p2.aerosol_particle_size_distribution.values, d2)
     tc = t1[cloud]
     j = np.clip(tc.searchsorted(t2), 1, len(tc) - 1) if len(tc) > 1 else np.zeros(len(t2), int)
     gap = np.minimum(np.abs((t2 - tc[j - 1]).total_seconds()), np.abs((t2 - tc[j]).total_seconds())) / 60
@@ -124,8 +129,8 @@ def main():
     good = valid >= a.min_bin_valid
     i0, i1 = np.argmax(good), len(good) - np.argmax(good[::-1])
     d2, w2 = d2[i0:i1], w2[:, i0:i1]
-    print(f"part2: {len(np.unique(np.round(p2.aerosol_diameters.values * 1e9, 1)))} bins merged to {len(d2)} "
-          f"({d2[0]:.1f}-{d2[-1]:.0f} nm kept); {inc.sum()} scans within {a.match_min:g} min of a GCVI scan")
+    print(f"part2: regridded to {len(d2)} log-spaced bins, {d2[0]:.1f}-{d2[-1]:.0f} nm valid in >= {a.min_bin_valid:.0%} of "
+          f"in-cloud scans; {inc.sum()} scans within {a.match_min:g} min of a GCVI scan")
     cut_nm = 2.0 * RADII_NM
     ccn = cumulative_above(w2[inc], d2, cut_nm)
     n70 = cumulative_above(w2[inc], d2, np.array([70.0]))[:, 0]
@@ -155,20 +160,25 @@ def main():
         for sh in (-1, 0, 1):
             vv = v.copy()
             vv.index = vv.index - pd.Timedelta(hours=sh)
-            m = vv.join(h1[["Nd_fm120", "Nd_residual"]], how="inner").join(h2[["N70"]], how="inner").dropna()
+            m = vv.join(h1[["Nd_fm120", "Nd_residual", "Nd_residual_dmps"]], how="inner").join(h2[["N70"]], how="inner")
+            m = m[(m > 0).all(axis=1)]
             if len(m) < 10:
                 print(f"  shift {sh:+d} h: {len(m)} matched hours")
                 continue
             lc = lambda x, y: np.corrcoef(np.log10(x), np.log10(y))[0, 1]
-            print(f"  shift {sh:+d} h: {len(m)} of {len(v)} hours matched; Nd/FM-120 median {np.median(m.Nd / m.Nd_fm120):.2f} "
-                  f"(r {lc(m.Nd, m.Nd_fm120):.2f}); Nd/residual {np.median(m.Nd / m.Nd_residual):.2f} (r {lc(m.Nd, m.Nd_residual):.2f}); "
-                  f"CCN/N70 {np.median(m.CCN / m.N70):.2f} (r {lc(m.CCN, m.N70):.2f})")
+            print(f"  shift {sh:+d} h: {len(m)} of {len(v)} hours matched (all values > 0); CCN/N70 {np.median(m.CCN / m.N70):.2f} "
+                  f"(r {lc(m.CCN, m.N70):.2f})")
+            for k, lab in [("Nd_fm120", "FM-120"), ("Nd_residual", "residual CPC"), ("Nd_residual_dmps", "residual DMPS")]:
+                q = m.Nd / m[k]
+                print(f"      Virtanen Nd / {lab:14s} median {np.median(q):.2f}, IQR [{q.quantile(.25):.2f}, {q.quantile(.75):.2f}], "
+                      f"r(log) {lc(m.Nd, m[k]):.2f}")
 
     os.makedirs(a.out_dir, exist_ok=True)
     common = {
         "Nd_fm120": ("time", h1.Nd_fm120.to_numpy(), {"units": "cm-3", "long_name": f"FM-120 droplet number, D >= {a.fm_min_um} um, mean of GCVI scans"}),
         "Nd_residual": ("time", h1.Nd_residual.to_numpy(), {"units": "cm-3", "long_name": "CPC cloud-residual number behind the GCVI (EF- and transmission-corrected)"}),
         "CCN": (("time", "radius"), h2[list(range(len(cut_nm)))].to_numpy(), {"units": "cm-3", "long_name": "N(D > 2*radius), whole-air DMPS (part2), in-cloud scans"}),
+        "Nd_residual_dmps": ("time", h1.Nd_residual_dmps.to_numpy(), {"units": "cm-3", "long_name": "integral of the residual DMPS spectrum"}),
         "N70": ("time", h2.N70.to_numpy(), {"units": "cm-3"}),
         "cloud_frac": ("time", cf.reindex(idx).to_numpy(), {"units": "1", "long_name": "fraction of the hour's part1 scans sampled through the GCVI"}),
         "residual_psd": (("time", "res_diameter"), hr.to_numpy(), {"units": "cm-3", "long_name": "cloud-residual dN/dlogD (part1 DMPS behind GCVI)"}),
