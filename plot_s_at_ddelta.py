@@ -51,9 +51,9 @@ SOURCES = [
     (r"/epcape_soledad_hourly_quicklook", "EPCAPE Mt Soledad", "Marine", "Ground in situ", "low"),
     (r"/puijo", "Puijo", "Boreal", "Ground in situ", "robust"),
     (r"/pallas", "Pallas", "Boreal", "Ground in situ", "robust"),
-    (r"/zeppelin_gcvi_residual_quicklook", "Zeppelin", "Arctic", "Ground in situ", "robust"),   # own build, Karlsson et al. 2021 GCVI data
+    (r"/zeppelin_insitu", "Zeppelin", "Arctic", "Ground in situ", "robust"),   # Virtanen et al. 2025 file (synthesis entry)
+    (r"/zeppelin_gcvi_residual_quicklook", "Zeppelin (GCVI residual)", "Arctic", "Ground in situ", "parked"),  # own build, Nd processing check
     (r"/zeppelin_gcvi_fm120_quicklook", "Zeppelin (FM-120)", "Arctic", "Ground in situ", "parked"),  # FM-120 misses droplets < 3.5 um
-    (r"/zeppelin_insitu", "Zeppelin (Virtanen)", "Arctic", "Ground in situ", "parked"),    # same data, Virtanen et al. Nd processing
     (r"/hyytiala_cloudnet", "Hyytiala", "Boreal", "Cloudnet", "moderate"),
     (r"/kenttarova_cloudnet", "Kenttarova", "Boreal", "Cloudnet", "moderate"),
     (r"/norunda_cloudnet", "Norunda", "Boreal", "Cloudnet", "moderate"),
