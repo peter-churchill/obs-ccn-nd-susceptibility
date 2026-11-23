@@ -12,6 +12,11 @@ For each quicklook table (written by `arm_ena_nd_pnsd.py quicklook`, columns D_n
 The tables are the ones on disk: re-run the quicklook with the synthesis settings first if they were overwritten.
 Quality (alpha) and the instrument used per source follow the synthesis (SOURCES below).
 Writes figures/synthesis/s_at_ddelta.png and results/s_at_ddelta.csv.
+
+If results/source_ntot.csv exists (python source_ntot.py), markers are sized by the median total aerosol number of each
+source (area ~ log10 N_total; hollow where the size distribution starts at >= 50 nm, so N_total is not a true total), and
+figures/synthesis/s_ddelta_vs_ntot.png shows S(100 nm) and D_Delta against N_total (Spearman rho over robust + moderate
+sources with a true total).
 """
 import argparse
 import glob
@@ -80,6 +85,15 @@ LABEL_OFF = {"Puijo": (-6, 6), "GoAmazon": (6, 6), "LASIC (SMPS)": (-6, -12), "Z
              "ACTIVATE summer": (-6, 6), "Hyytiala": (6, -10), "Kenttarova": (-6, -12), "ACE-ENA": (6, -2),
              "CACTI": (6, 4), "ACME-V": (6, -4), "SGP (Cloudnet)": (6, 4), "MOSAiC (Cloudnet)": (6, -10),
              "EPCAPE Mt Soledad": (6, 6), "Bankhead": (6, -10), "HI-SCALE": (-6, 6)}
+NTOT_CSV = "results/source_ntot.csv"
+HOLLOW_DMIN = 50.0                                   # nm: N_total from a size distribution starting above this is not a total
+
+
+def msz(n):
+    """Marker diameter (pt) from median N_total: ~4.6 at 30, 9 at 300, 13.6 at 3000 cm-3; 8 if unknown."""
+    return 8.0 if not np.isfinite(n) else float(np.clip(4 + 4.5 * (np.log10(n) - 1.5), 3, 16))
+
+
 QA = {"robust": 1.0, "moderate": 0.8, "slope only": 0.55, "Nd unverified": 0.55, "low": 0.3}
 
 
@@ -118,7 +132,7 @@ def main():
     ap.add_argument("--exclude", nargs="*", default=[], help="extra path regexes to skip")
     ap.add_argument("--out", default="figures/synthesis/s_at_ddelta.png")
     a = ap.parse_args()
-    rows, seen, unmatched = [], set(), []
+    rows, seen, unmatched, srows, sseen = [], set(), [], [], set()
     for csv in sorted(glob.glob("results/**/*_quicklook.csv", recursive=True)):
         p = csv.replace("\\", "/")
         if any(re.search(s, p) for s in SKIP + a.exclude):
@@ -137,6 +151,11 @@ def main():
         d = t.D_nm.to_numpy(float)
         dd = crossing(d, t.delta_dex.to_numpy(float))
         s100 = at(d, t.S.to_numpy(float), 100.0)
+        if label not in sseen:                               # all sources, crossing or not, for the N_total figure
+            sseen.add(label)
+            srows.append(dict(label=label, regime=regime, method=method, quality=quality, S100=s100,
+                              S100_lo=at(d, t.S_lo.to_numpy(float), 100.0), S100_hi=at(d, t.S_hi.to_numpy(float), 100.0),
+                              D_Delta=dd))
         if not np.isfinite(dd):
             print(f"  {label:24s} no D_Delta crossing ({p})")
             continue
@@ -153,6 +172,19 @@ def main():
     if nofile:
         print(f"  no quicklook table found for: {', '.join(nofile)}")
     r = pd.DataFrame(rows).sort_values("D_Delta")
+    sr = pd.DataFrame(srows)
+    have_nt = os.path.exists(NTOT_CSV)
+    if have_nt:
+        nt = pd.read_csv(NTOT_CSV).set_index("label")
+        for df in (r, sr):
+            df["N_total"] = df.label.map(nt.N_total_median)
+            df["N_total_Dmin"] = df.label.map(nt.D_min_nm)
+        miss = sr.label[sr.N_total.isna()].tolist()
+        if miss:
+            print(f"  no N_total in {NTOT_CSV} for: {', '.join(miss)} (rerun source_ntot.py)")
+    else:
+        print(f"  {NTOT_CSV} not found: markers not sized by N_total (run python source_ntot.py)")
+        r["N_total"], r["N_total_Dmin"] = np.nan, np.nan
     os.makedirs("results", exist_ok=True)
     r.to_csv("results/s_at_ddelta.csv", index=False, float_format="%.3f")
     with pd.option_context("display.width", 200, "display.max_colwidth", 60):
@@ -168,8 +200,9 @@ def main():
         xe = [[max(x.D_Delta - x.D_lo, 0)], [max(x.D_hi - x.D_Delta, 0)]] if np.isfinite(x.D_lo) else None
         ye = [[max(x.S_at_D - x.S_lo, 0)], [max(x.S_hi - x.S_at_D, 0)]] if np.isfinite(x.S_lo) else None
         al = QA.get(x.quality, 0.55)
-        ax.errorbar(x.D_Delta, x.S_at_D, xerr=xe, yerr=ye, fmt=MK[x.method], color=REG_COL[x.regime], ms=8,
-                    mec="k", mew=0.6, alpha=al, elinewidth=1, capsize=2)
+        hollow = np.isfinite(x.N_total_Dmin) and x.N_total_Dmin >= HOLLOW_DMIN
+        ax.errorbar(x.D_Delta, x.S_at_D, xerr=xe, yerr=ye, fmt=MK[x.method], color=REG_COL[x.regime], ms=msz(x.N_total),
+                    mfc="white" if hollow else REG_COL[x.regime], mec="k", mew=0.6, alpha=al, elinewidth=1, capsize=2)
         ax.annotate(x.label, (x.D_Delta, x.S_at_D), xytext=LABEL_OFF.get(x.label, (5, 4)), textcoords="offset points",
                     fontsize=7.5, alpha=max(al, 0.6), ha="right" if LABEL_OFF.get(x.label, (5, 4))[0] < 0 else "left")
     ax.axhline(0, color="0.6", lw=0.8); ax.axhline(1, color="0.6", lw=0.8, ls=":")
@@ -181,11 +214,57 @@ def main():
     ax.grid(alpha=0.3)
     h = ([Line2D([], [], ls="", marker="o", color=c, mec="k", ms=8, label=k) for k, c in REG_COL.items()]
          + [Line2D([], [], ls="", marker=m, color="0.7", mec="k", ms=8, label=k) for k, m in MK.items()])
+    if have_nt:
+        h += [Line2D([], [], ls="", marker="o", color="0.6", mec="k", ms=msz(n), label=f"N$_{{tot}}$ {n} cm$^{{-3}}$")
+              for n in (30, 300, 3000)]
+        h += [Line2D([], [], ls="", marker="o", mfc="white", mec="k", ms=8, label="hollow: N only above 60-95 nm")]
     ax.legend(handles=h, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.1), ncol=5, frameon=False)
     fig.tight_layout()
     os.makedirs(os.path.dirname(a.out), exist_ok=True)
     fig.savefig(a.out, dpi=150)
     print(f"\nSaved {a.out} and results/s_at_ddelta.csv ({len(r)} sources)")
+    if have_nt:
+        plot_vs_ntot(sr, os.path.join(os.path.dirname(a.out), "s_ddelta_vs_ntot.png"))
+
+
+def plot_vs_ntot(sr, out):
+    """S(100 nm) and D_Delta against the median total aerosol number of each source."""
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+    from matplotlib.ticker import FixedLocator, ScalarFormatter, NullFormatter
+    from scipy.stats import spearmanr
+    sr = sr[np.isfinite(sr.N_total)].copy()
+    sr["hollow"] = sr.N_total_Dmin >= HOLLOW_DMIN
+    good = sr.quality.isin(["robust", "moderate"]) & ~sr.hollow
+    fig, axs = plt.subplots(1, 2, figsize=(14, 6))
+    for ax, y, lo, hi, lab in [(axs[0], "S100", "S100_lo", "S100_hi", "S(100 nm)"),
+                               (axs[1], "D_Delta", None, None, "D$_\\Delta$ (nm)")]:
+        for _, x in sr[np.isfinite(sr[y])].iterrows():
+            ye = [[max(x[y] - x[lo], 0)], [max(x[hi] - x[y], 0)]] if lo and np.isfinite(x[lo]) else None
+            al = QA.get(x.quality, 0.55)
+            ax.errorbar(x.N_total, x[y], yerr=ye, fmt=MK[x.method], color=REG_COL[x.regime], ms=8,
+                        mfc="white" if x.hollow else REG_COL[x.regime], mec="k", mew=0.6, alpha=al, elinewidth=1, capsize=2)
+            if x.quality in ("robust", "moderate"):
+                ax.annotate(x.label, (x.N_total, x[y]), xytext=(5, 3), textcoords="offset points", fontsize=7, alpha=max(al, 0.6))
+        g = sr[good & np.isfinite(sr[y])]
+        rho, p = spearmanr(np.log10(g.N_total), g[y])
+        ax.set(xscale="log", xlabel="median total aerosol number N$_{tot}$ (cm$^{-3}$)", ylabel=lab)
+        ax.set_title(f"{lab} vs N$_{{tot}}$\nSpearman $\\rho$ = {rho:.2f}, p = {p:.3f} (n = {len(g)}: robust/moderate, true totals)",
+                     fontsize=10)
+        ax.grid(alpha=0.3)
+    axs[0].axhline(0, color="0.6", lw=0.8); axs[0].axhline(1, color="0.6", lw=0.8, ls=":")
+    axs[1].set_yscale("log")
+    axs[1].yaxis.set_major_locator(FixedLocator([20, 30, 50, 70, 100, 150, 200, 300]))
+    axs[1].yaxis.set_major_formatter(ScalarFormatter()); axs[1].yaxis.set_minor_formatter(NullFormatter())
+    h = ([Line2D([], [], ls="", marker="o", color=c, mec="k", ms=8, label=k) for k, c in REG_COL.items()]
+         + [Line2D([], [], ls="", marker=m, color="0.7", mec="k", ms=8, label=k) for k, m in MK.items()]
+         + [Line2D([], [], ls="", marker="o", mfc="white", mec="k", ms=8, label="hollow: N only above 60-95 nm")])
+    fig.legend(handles=h, fontsize=8, loc="lower center", ncol=6, frameon=False, bbox_to_anchor=(0.5, -0.09))
+    fig.suptitle("Susceptibility and closure diameter against aerosol loading (fainter = lower quality; S with 95% day-block CI)", fontsize=11)
+    fig.tight_layout()
+    fig.savefig(out, dpi=150, bbox_inches="tight")
+    sr.to_csv("results/s_ddelta_vs_ntot.csv", index=False, float_format="%.3f")
+    print(f"Saved {out} and results/s_ddelta_vs_ntot.csv ({len(sr)} sources)")
 
 
 if __name__ == "__main__":
