@@ -53,6 +53,7 @@ SPECS = {
     "Bankhead": _cn("arm-bankhead", ["arm/bnf/smps/*.nc"]),
     "Oliktok": _cn("arm-oliktok", ["arm/oli/uhsas/*.nc"]),
     "Hyytiala": _cn("hyytiala", ["ebas/FI0050R*.nc", "ebas/hyytiala/*.nc"]),
+    "Leipzig": _cn("leipzig", ["ebas/leipzig/DE0055B*.nc"]),        # urban-background TDMPS, not the roadside DE0066K files
     **{lab: _cn(site, [f"ebas/{site}/*.nc"]) for lab, site in [
         ("Cabauw", "cabauw"), ("Granada", "granada"), ("Kenttarova", "kenttarova"), ("Mace Head", "mace-head"),
         ("Ny-Alesund", "ny-alesund"), ("Palaiseau", "palaiseau"), ("Schneefernerhaus", "schneefernerhaus"),

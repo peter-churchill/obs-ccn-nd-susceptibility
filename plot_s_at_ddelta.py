@@ -76,6 +76,7 @@ SOURCES = [
     (r"/schneefernerhaus_cloudnet", "Schneefernerhaus", "Continental", "Cloudnet", "low"),
     (r"/bucharest_cloudnet", "Bucharest", "Continental", "Cloudnet", "moderate"),
     (r"/melpitz_cloudnet", "Melpitz", "Continental", "Cloudnet", "moderate"),
+    (r"/leipzig_cloudnet_quicklook", "Leipzig", "Continental", "Cloudnet", "moderate"),     # TROPOS urban-background TDMPS (EBAS DE0055B), 695 h
 ]
 SKIP = [r"pilot_", r"_median", r"_orig", r"_sza\d", r"/ena_2023_", r"pnsd_"]
 REG_COL = {"Marine": "#1f77b4", "Marine CAO": "#17becf", "Boreal": "#2ca02c", "Arctic": "#9467bd", "Continental": "#d62728"}
