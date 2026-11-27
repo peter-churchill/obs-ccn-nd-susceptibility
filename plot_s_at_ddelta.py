@@ -40,6 +40,9 @@ SOURCES = [
     (r"/naames_aircraft_quicklook", "NAAMES", "Marine", "Aircraft", "moderate"),
     (r"/camp2ex_aircraft_quicklook", "CAMP2Ex", "Marine", "Aircraft", "moderate"),
     (r"/oracles_aircraft_quicklook", "ORACLES", "Marine", "Aircraft", "moderate"),
+    (r"/socrates_aircraft_quicklook", "SOCRATES", "Marine", "Aircraft", "moderate"),     # Southern Ocean, NSF/NCAR GV, CDP + wing UHSAS
+    (r"/cset_aircraft_quicklook", "CSET", "Marine", "Aircraft", "moderate"),             # NE Pacific Sc-Cu, NSF/NCAR GV, CDP + wing UHSAS
+    (r"/vocals_aircraft_quicklook", "VOCALS-REx", "Marine", "Aircraft", "moderate"),     # SE Pacific Sc, NSF/NCAR C-130, CDP + PCASP (>= 120 nm: no S(100))
     (r"/acapex_aircraft_uhsas_quicklook", "ACAPEX", "Marine", "Aircraft", "moderate"),
     (r"/acme-v_aircraft_pcasp_quicklook", "ACME-V", "Arctic", "Aircraft", "moderate"),
     (r"/hi-scale_aircraft_mergedaerosolsd_quicklook", "HI-SCALE", "Continental", "Aircraft", "robust"),
@@ -110,8 +113,11 @@ def crossing(d, y):
 
 
 def at(d, y, x):
+    """y interpolated to x in log d; NaN outside the cutoffs where y exists (no clamping to the edge value)."""
     ok = np.isfinite(y)
-    return float(np.interp(np.log(x), np.log(d[ok]), y[ok])) if ok.sum() >= 2 else np.nan
+    if ok.sum() < 2 or not d[ok].min() <= x <= d[ok].max():
+        return np.nan
+    return float(np.interp(np.log(x), np.log(d[ok]), y[ok]))
 
 
 def txt_ci(csv, dd):

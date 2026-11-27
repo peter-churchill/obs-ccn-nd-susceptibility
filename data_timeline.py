@@ -69,6 +69,8 @@ SPECS = {
     "NAAMES": (["aircraft/naames/NAAMES_Cloud_AircraftInSitu_Data/**/*.ict"], ["aircraft/naames/NAAMES_Aerosol_AircraftInSitu_Data/**/*.ict"]),
     "ORACLES": (["aircraft/oracles/ORACLES_Cloud_AircraftInSitu_Data/**/*.ict"], ["aircraft/oracles/ORACLES_Aerosol_AircraftInSitu_Data/**/*.ict"]),
     "CAMP2Ex": (["aircraft/camp2ex/*Cloud*/**/*.ict"], ["aircraft/camp2ex/*Aerosol*/**/*.ict"]),
+    **{lab: ([f"aircraft/{c}/lrt/*.nc"], [f"aircraft/{c}/lrt/*.nc"]) for lab, c in
+       [("SOCRATES", "socrates"), ("CSET", "cset"), ("VOCALS-REx", "vocals")]},    # one NSF/NCAR file per flight holds both
 }
 DATE_RE = __import__("re").compile(r"(?<!\d)((?:19|20)\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)")
 
