@@ -41,6 +41,9 @@ python aircraft_build.py --format activate --cloud-dir data/aircraft/activate/cl
     --out results/aircraft/activate_aircraft.nc
 (ACTIVATE: FCDP 3-50 um droplets; SMPS 3-94 nm + LAS 94-3490 nm dry aerosol converted to ambient;
  CVI-inlet seconds dropped; see activate_reader.py)
+python aircraft_build.py --format ncar --cloud-dir data/aircraft/socrates/lrt --aerosol-dir data/aircraft/socrates/lrt \\
+    --site-name "SOCRATES (NSF/NCAR GV)" --out results/aircraft/socrates_aircraft.nc
+(NSF/NCAR LRT files hold every probe: CDP (or FSSP) droplets and UHSAS (or PCASP) aerosol; see ncar_reader.py)
 """
 import argparse
 import glob
@@ -231,11 +234,15 @@ def main():
                          "concentration when present, else the long name")
     ap.add_argument("--clear-nd", type=float, default=1.0,
                     help="cm-3; drop aerosol seconds within 2 s of droplets above this (0 = off)")
-    ap.add_argument("--format", choices=["arm", "activate", "naames", "camp2ex", "oracles"], default="arm",
+    ap.add_argument("--format", choices=["arm", "activate", "naames", "camp2ex", "oracles", "ncar"], default="arm",
                     help="arm: ARM netCDF (default); activate: NASA ACTIVATE ICARTT files "
                          "(FCDP in --cloud-dir, LAS/SMPS/InletFlag in --aerosol-dir, 1-s merges in --merge-dir); "
                          "naames / camp2ex: NASA LaRC LARGE files (CDP + CloudFlag in --cloud-dir, SMPS/LAS in --aerosol-dir, "
                          "HSKPING in --merge-dir), see larc_reader.py")
+    ap.add_argument("--ncar-cloud-probe", choices=["cdp", "fssp"], default="cdp", help="NSF/NCAR files: droplet probe")
+    ap.add_argument("--ncar-aerosol-probe", choices=["uhsas", "pcasp"], default="uhsas", help="NSF/NCAR files: aerosol probe")
+    ap.add_argument("--ncar-cloud-var", default=None, help="NSF/NCAR files: force a variable, e.g. CONCD_LWOI")
+    ap.add_argument("--ncar-aerosol-var", default=None, help="NSF/NCAR files: force a variable, e.g. CUHSAS_RWOOU")
     ap.add_argument("--merge-dir", default=None,
                     help="ACTIVATE 1-s merge folder for position (default: <cloud-dir>/../merge)")
     ap.add_argument("--nd-stat", choices=["mean", "median"], default="mean",
@@ -262,6 +269,11 @@ def main():
         c = read_cloud_oracles(a.cloud_dir, a.nd_dmin, a.nd_dmax, mdir)
         aer, am, dnm = read_aerosol_oracles(a.aerosol_dir, mdir, cloud=c if a.clear_nd > 0 else None,
                                             clear_nd=a.clear_nd, stp=a.activate_stp)
+    elif a.format == "ncar":
+        from ncar_reader import read_cloud_ncar, read_aerosol_ncar
+        c = read_cloud_ncar(a.cloud_dir, a.nd_dmin, a.nd_dmax, probe=a.ncar_cloud_probe, var=a.ncar_cloud_var)
+        aer, am, dnm = read_aerosol_ncar(a.aerosol_dir, cloud=c if a.clear_nd > 0 else None, clear_nd=a.clear_nd,
+                                         probe=a.ncar_aerosol_probe, var=a.ncar_aerosol_var)
     else:
         c = read_cloud(a.cloud_dir, a.nd_dmin, a.nd_dmax)
         aer, am, dnm = read_aerosol(a.aerosol_dir, cloud=c if a.clear_nd > 0 else None, clear_nd=a.clear_nd,
