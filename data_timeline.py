@@ -57,8 +57,8 @@ SPECS = {
     **{lab: _cn(site, [f"ebas/{site}/*.nc"]) for lab, site in [
         ("Cabauw", "cabauw"), ("Granada", "granada"), ("Kenttarova", "kenttarova"), ("Mace Head", "mace-head"),
         ("Ny-Alesund", "ny-alesund"), ("Palaiseau", "palaiseau"), ("Schneefernerhaus", "schneefernerhaus"),
-        ("Norunda", "norunda"), ("Bucharest", "bucharest"), ("Melpitz", "melpitz"), ("Maido", "maido"),
-        ("Andoya (Cloudnet)", "andoya")]},
+        ("Norunda", "norunda"), ("Bucharest", "bucharest"), ("Melpitz", "melpitz"), ("Maido", "maido")]},
+    "Andoya (Cloudnet)": _cn("arm-andoya", ["arm/anx/uhsas/*.nc"]),                  # ARM COMBLE: Cloudnet + ARM UHSAS
     # in situ
     "Pallas": (["virtanen/Pallas_Nd_CCN.csv"], ["virtanen/Pallas_PNSD.csv"]),
     "Puijo": (["virtanen/Puijo_Nd_CCN.csv"], ["virtanen/Puijo_PNSD.csv"]),
@@ -67,7 +67,8 @@ SPECS = {
     "ACE-ENA": (["aircraft/ace-ena/enaaafmergedcldsdF1.c1/*"], ["aircraft/ace-ena/enaaafmergedaerosolsdF1.c1/*"]),
     "ACAPEX": (["aircraft/acapex/acxaaffcdpF1.c1/*"], ["aircraft/acapex/acxaafuhsasF1.b1/*"]),
     "NAAMES": (["aircraft/naames/NAAMES_Cloud_AircraftInSitu_Data/**/*.ict"], ["aircraft/naames/NAAMES_Aerosol_AircraftInSitu_Data/**/*.ict"]),
-    "ORACLES": (["aircraft/oracles/ORACLES_Cloud_AircraftInSitu_Data/**/*.ict"], ["aircraft/oracles/ORACLES_Aerosol_AircraftInSitu_Data/**/*.ict"]),
+    "ORACLES": (["aircraft/oracles/ORACLES_Cloud_AircraftInSitu_Data/**/*.ict"],
+                ["aircraft/oracles/ORACLES_Aerosol_AircraftInSitu_Data/**/*.nc", "aircraft/oracles/ORACLES_Aerosol_AircraftInSitu_Data/**/*.ict"]),
     "CAMP2Ex": (["aircraft/camp2ex/*Cloud*/**/*.ict"], ["aircraft/camp2ex/*Aerosol*/**/*.ict"]),
     **{lab: ([f"aircraft/{c}/lrt/*.nc"], [f"aircraft/{c}/lrt/*.nc"]) for lab, c in
        [("SOCRATES", "socrates"), ("CSET", "cset"), ("VOCALS-REx", "vocals")]},    # one NSF/NCAR file per flight holds both
