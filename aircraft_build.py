@@ -21,6 +21,15 @@ Method, per flight:
     Need at least --min-aer s. The aerosol of a pass = median size distribution of those seconds.
  5. N(D > cutoff) on the same cutoff grid as the ground sites.
 
+With --met-dir (found automatically for every --format when the campaign has a merged met file), each pass
+also gets what a parcel model needs (see aircraft_met.py):
+ 6. w(time, w_sample): the 1-Hz vertical wind during the pass (in cloud, near base), with sigma_w and w_mean.
+ 7. cloud_base_temperature [K] and cloud_base_pressure [hPa]: median of the met seconds within --base-band m
+    of the local cloud base (same time and distance window as the aerosol), else the pass mean carried down
+    to the base (6 K/km and hypsometric); base_tp_source says which.
+ 8. ams_org/so4/nh4/no3/chl [ug m-3, as stored]: median over the same below-cloud seconds as the aerosol,
+    when the campaign has an AMS and at least --min-ams of those seconds have valid AMS data.
+
 Output has the same layout as the other builds (CDNC, CCN(radius), cloud_frac = 1), one row
 per cloud pass, so `arm_ena_nd_pnsd.py quicklook` runs on it unchanged. The day-block
 bootstrap there resamples whole flights (one flight per day).
@@ -57,6 +66,7 @@ import xarray as xr
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from arm_ena_nd_pnsd import RADII_NM, cumulative_above  # noqa: E402
+from aircraft_met import read_met, default_met_dir  # noqa: E402
 
 
 def _diam_um(ds, dim):
@@ -194,7 +204,8 @@ def cloud_passes(c, a):
         dur = (g.index[-1] - g.index[0]).total_seconds() + 1
         if len(g) < a.seg_min:
             continue
-        rows.append({"time": g.index[0] + (g.index[-1] - g.index[0]) / 2, "Nd": g["Nd"].mean() if a.nd_stat == "mean" else g["Nd"].median(),
+        rows.append({"t_start": g.index[0], "t_end": g.index[-1],
+                     "time": (g.index[0] + (g.index[-1] - g.index[0]) / 2).floor("s"), "Nd": g["Nd"].mean() if a.nd_stat == "mean" else g["Nd"].median(),
                      "Nd_iqr_ratio": g["Nd"].quantile(.75) / max(g["Nd"].quantile(.25), 1e-9),
                      "LWC": g["LWC"].median(), "alt": g["alt"].median(), "lat": g["lat"].median(),
                      "lon": g["lon"].median(), "duration_s": dur, "n_s": len(g)})
@@ -210,6 +221,61 @@ def cloud_passes(c, a):
     p["cloud_base"] = base
     p["above_base"] = p["alt"] - p["cloud_base"]
     return p[p["above_base"] <= a.max_above_base].reset_index(drop=True)
+
+MET_VARS = {
+    "sigma_w": {"units": "m s-1", "long_name": "std of the 1-Hz vertical wind during the pass"},
+    "w_mean": {"units": "m s-1", "long_name": "mean vertical wind during the pass"},
+    "n_w": {"units": "1", "long_name": "1-Hz vertical-wind samples during the pass"},
+    "cloud_base_temperature": {"units": "K", "long_name": "static temperature at the local cloud base"},
+    "cloud_base_pressure": {"units": "hPa", "long_name": "static pressure at the local cloud base"},
+    **{f"ams_{sp}": {"units": "ug m-3 (as stored: STP for NASA merges)",
+                     "long_name": f"AMS {sp}, median over the below-cloud aerosol seconds"}
+       for sp in ("org", "so4", "nh4", "no3", "chl")},
+    "n_ams_s": {"units": "1", "long_name": "below-cloud seconds with valid AMS"},
+}
+
+
+def met_for_pass(met, r, aer_times, a):
+    """Vertical wind during the pass, cloud-base T and p, and below-cloud AMS for one cloud pass."""
+    nan = float("nan")
+    out = {k: nan for k in MET_VARS}
+    out.update(base_tp_source="none", _w=np.array([]))
+    if met is None:
+        return out
+    # vertical wind: 1-Hz samples during the pass (in cloud, within --max-above-base of the base)
+    w = met["w"][(met.index >= r.t_start) & (met.index <= r.t_end)].dropna().to_numpy()
+    if len(w) > a.max_w_samples:
+        w = w[np.linspace(0, len(w) - 1, a.max_w_samples).astype(int)]
+    if len(w) >= 3:
+        out.update(sigma_w=float(np.std(w)), w_mean=float(np.mean(w)), n_w=float(len(w)), _w=w)
+    # cloud-base T and p: met seconds within --base-band of the local base, same time and distance window
+    tw = (met.index >= r.time - pd.Timedelta(seconds=a.max_dt)) & (met.index <= r.time + pd.Timedelta(seconds=a.max_dt))
+    band = tw & (np.abs(met["alt"].to_numpy() - r.cloud_base) <= a.base_band)
+    if band.any():
+        band &= _km(r.lat, r.lon, met["lat"].to_numpy(), met["lon"].to_numpy()) <= a.max_dist
+    tb, pb = met["T"].to_numpy()[band], met["P"].to_numpy()[band]
+    if np.isfinite(tb).sum() >= 5 and np.isfinite(pb).sum() >= 5:
+        out.update(cloud_base_temperature=float(np.nanmedian(tb)), cloud_base_pressure=float(np.nanmedian(pb)),
+                   base_tp_source="base_band")
+    else:                                        # carry the pass mean down to the base
+        inp = (met.index >= r.t_start) & (met.index <= r.t_end)
+        tp, pp = np.nanmedian(met["T"].to_numpy()[inp]) if inp.any() else nan, \
+            np.nanmedian(met["P"].to_numpy()[inp]) if inp.any() else nan
+        if np.isfinite(tp) and np.isfinite(pp):
+            dz = max(float(r.above_base), 0.0)
+            out.update(cloud_base_temperature=float(tp + 0.006 * dz),
+                       cloud_base_pressure=float(pp * np.exp(9.80665 * dz / (287.05 * (tp + 0.003 * dz)))),
+                       base_tp_source="pass_mean_to_base")
+    # AMS over the same below-cloud seconds as the aerosol
+    if "ams_ok" in met and met["ams_ok"].any():
+        m = met.reindex(aer_times.floor("s"))
+        ok = m["ams_ok"].fillna(False).to_numpy(bool) & np.isfinite(m["ams_so4"].to_numpy(float)) \
+            & np.isfinite(m["ams_org"].to_numpy(float))
+        out["n_ams_s"] = float(ok.sum())
+        if ok.sum() >= a.min_ams:
+            for sp in ("org", "so4", "nh4", "no3", "chl"):
+                out[f"ams_{sp}"] = float(np.nanmedian(m[f"ams_{sp}"].to_numpy(float)[ok]))
+    return out
 
 
 def main():
@@ -247,6 +313,13 @@ def main():
                     help="ACTIVATE 1-s merge folder for position (default: <cloud-dir>/../merge)")
     ap.add_argument("--nd-stat", choices=["mean", "median"], default="mean",
                     help="how the 1-Hz in-cloud seconds of a pass are combined into its Nd (mean = in-cloud average as in the models; at ENA the hourly-mean NDROP matched the aircraft, the median was about 40 per cent low)")
+    ap.add_argument("--met-dir", default=None,
+                    help="folder with the 1-Hz vertical wind, static T/p and AMS (default: found per --format, "
+                         "e.g. <campaign>/*aafmergedF1.c1 for ARM, the merge folder for NASA, the LRT files for NCAR); "
+                         "'none' to skip")
+    ap.add_argument("--base-band", type=float, default=30.0, help="m around cloud base for the base T and p")
+    ap.add_argument("--max-w-samples", type=int, default=600, help="1-Hz w samples kept per pass")
+    ap.add_argument("--min-ams", type=int, default=10, help="below-cloud seconds with valid AMS needed for a pass")
     ap.add_argument("--activate-stp", action="store_true",
                     help="ACTIVATE: keep aerosol at STP instead of converting to ambient")
     a = ap.parse_args()
@@ -288,9 +361,20 @@ def main():
     p = cloud_passes(c, a)
     if p.empty:
         sys.exit("No cloud passes found.")
+    met = None
+    if (a.met_dir or "").lower() != "none":
+        mdir_met = a.met_dir or default_met_dir(a.format, a.cloud_dir, a.merge_dir)
+        met = read_met(mdir_met)
+    if met is not None:
+        pos = c[["alt", "lat", "lon"]].copy()
+        pos.index = pos.index.floor("s")
+        pos = pos[~pos.index.duplicated()]
+        met = met.join(pos, how="left")
+        if met["alt"].isna().all():
+            print("  met: no position match with the cloud probe; base T/p from the pass mean only")
     print(f"Cloud passes within {a.max_above_base:.0f} m of base: {len(p)}")
     cut_nm = 2.0 * RADII_NM
-    rows, ccn_rows, pnsd = [], [], []
+    rows, ccn_rows, pnsd, wsamp = [], [], [], []
     for _, r in p.iterrows():
         tw = (am.index >= r.time - pd.Timedelta(seconds=a.max_dt)) & (am.index <= r.time + pd.Timedelta(seconds=a.max_dt))
         below = am["alt"].to_numpy() <= r.cloud_base - a.below_margin
@@ -309,6 +393,8 @@ def main():
                      "N70_500": band[2] - np.nan_to_num(band[4])})
         ccn_rows.append(ccn)
         pnsd.append(med)
+        rows[-1].update(met_for_pass(met, r, am.index[sel], a))
+        wsamp.append(rows[-1].pop("_w"))
     if not rows:
         sys.exit("No cloud pass has enough below-cloud aerosol nearby; relax --max-dt / --max-dist / --min-aer.")
     d = pd.DataFrame(rows)
@@ -317,6 +403,18 @@ def main():
     d, t = d.iloc[order].reset_index(drop=True), t[order]
     ccn = np.array(ccn_rows)[order]
     pnsd = np.array(pnsd)[order]
+    wsamp = [wsamp[i] for i in order]
+    nw = max([len(x) for x in wsamp] + [1])
+    W = np.full((len(wsamp), nw), np.nan)
+    for i, x in enumerate(wsamp):
+        W[i, :len(x)] = x
+    if met is not None:
+        have_w = np.isfinite(d["sigma_w"]).sum()
+        have_tp = (d["base_tp_source"] != "none").sum()
+        have_ams = np.isfinite(d["ams_so4"]).sum()
+        print(f"Met per pass: w in {have_w} (median sigma_w {np.nanmedian(d['sigma_w']):.2f} m s-1), "
+              f"cloud-base T/p in {have_tp} ({(d['base_tp_source'] == 'base_band').sum()} from the base band), "
+              f"AMS in {have_ams} of {len(d)} passes")
     print(f"Paired passes: {len(d)} on {t.normalize().nunique()} flights; median Nd {d.Nd.median():.0f}, "
           f"median N(>100 nm) {np.nanmedian(ccn[:, np.argmin(abs(cut_nm - 100))]):.0f} cm-3; "
           f"aerosol median {d.aer_dt_s.median() / 60:.0f} min and {d.aer_dist_km.median():.0f} km from the pass")
@@ -328,7 +426,11 @@ def main():
          "dNdlogDp": (("time", "aerosol_diameter"), pnsd, {"units": "cm-3", "long_name": "median below-cloud dN/dlogDp"}),
          **{k: ("time", d[k].to_numpy(dtype=float)) for k in
             ["LWC", "alt", "lat", "lon", "cloud_base", "above_base", "duration_s", "n_s", "Nd_iqr_ratio",
-             "n_aer_s", "aer_alt", "aer_dt_s", "aer_dist_km", "N_tot", "N_aitken_20_100", "N70_500"]}},
+             "n_aer_s", "aer_alt", "aer_dt_s", "aer_dist_km", "N_tot", "N_aitken_20_100", "N70_500"]},
+         **({k: ("time", d[k].to_numpy(dtype=float), u) for k, u in MET_VARS.items()} if met is not None else {}),
+         **({"base_tp_source": ("time", d["base_tp_source"].to_numpy(dtype=str)),
+             "w": (("time", "w_sample"), W, {"units": "m s-1", "long_name": "1-Hz vertical wind during the pass"})}
+            if met is not None else {})},
         coords={"time": t.values,
                 "radius": ("radius", RADII_NM, {"units": "nm", "long_name": "cutoff radius"}),
                 "diameter": ("radius", cut_nm, {"units": "nm", "long_name": "cutoff diameter"}),

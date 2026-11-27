@@ -73,7 +73,7 @@ def ict_vars(path):
 def base_name(name):
     """Strip ICARTT merge suffixes: the PI name (_THORNHILL) and a unit tag (_ms-1), e.g.
     w_ms-1_THORNHILL -> w, Static_Air_Temp_THORNHILL -> Static_Air_Temp."""
-    n = re.sub(r"(_[A-Z][A-Z0-9]{2,})+$", "", name)
+    n = re.sub(r"(_[A-Z]{4,})+$", "", name)          # letters only, so _SO4 / _NH4 / _NO3 survive
     return re.sub(r"_(ms-1|m_?s-?1|deg|degc|k|hpa|mb)$", "", n, flags=re.I)
 
 
