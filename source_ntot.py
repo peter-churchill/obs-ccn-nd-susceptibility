@@ -101,8 +101,8 @@ for csv in sorted(glob.glob(f"{RESULTS}/**/*_quicklook.csv", recursive=True)):
             break
     tm = pd.DatetimeIndex(ds["time"].values)
     allc, ally = ds["CCN"].values, ds["CDNC"].values
-    paired = np.isfinite(ally) & (ally > 0) & np.isfinite(allc[:, i100])
-    tp, ts = tm[paired], tm[m][np.isfinite(y) & (y > 0) & np.isfinite(ccn[:, i100])]
+    paired = np.isfinite(ally) & (ally > 0) & np.isfinite(allc).any(axis=1)      # any cutoff (VOCALS PCASP starts at 120 nm)
+    tp, ts = tm[paired], tm[m][np.isfinite(y) & (y > 0) & np.isfinite(ccn).any(axis=1)]
     yrs = sorted(set(ts.year))
     period = dict(paired_start=tp.min().date() if len(tp) else None, paired_end=tp.max().date() if len(tp) else None,
                   paired_hours=int(paired.sum()), paired_days=int(tp.normalize().nunique()),
@@ -115,7 +115,7 @@ for csv in sorted(glob.glob(f"{RESULTS}/**/*_quicklook.csv", recursive=True)):
     ntot = np.nanmedian(ccn[ok, j]) if j is not None else np.nan
     rows.append(dict(label=label, regime=regime, method=method, quality=quality, hours=int(ok.sum()),
                      D_min_nm=diam[j] if j is not None else np.nan, N_total_median=ntot,
-                     N100_median=np.nanmedian(ccn[ok, i100]), Nd_median=np.nanmedian(y[ok]),
+                     N100_median=np.nanmedian(ccn[ok, i100]) if np.isfinite(ccn[ok, i100]).any() else np.nan, Nd_median=np.nanmedian(y[ok]),
                      hours_match=n100 == n_ql, **period, file=nc))
     ds.close()
     print(f"  {label:26s} {ok.sum():5d} h  N(>{rows[-1]['D_min_nm']:.0f} nm) {ntot:7.0f}  N100 {rows[-1]['N100_median']:6.0f}  "
